@@ -7,16 +7,21 @@ import androidx.media3.common.MediaItem
 import androidx.media3.transformer.Composition
 import androidx.media3.transformer.ExportException
 import androidx.media3.transformer.ExportResult
+import androidx.media3.transformer.ProgressHolder
 import androidx.media3.transformer.Transformer
 import com.clipcut.data.stream.PlaylistRepository
 import com.clipcut.data.stream.SegmentFetcher
 import com.clipcut.data.stream.SegmentSelector
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import java.io.File
 import javax.inject.Inject
+
+private const val PROGRESS_POLL_MS = 300L
 
 class Media3ClipExporter @Inject constructor(
     @ApplicationContext private val context: Context,
@@ -24,7 +29,8 @@ class Media3ClipExporter @Inject constructor(
     private val segmentFetcher: SegmentFetcher,
 ) : ClipExporter {
 
-    override suspend fun export(range: ClipRange): Result<File> = runCatching {
+    override suspend fun export(range: ClipRange, onProgress: (String) -> Unit): Result<File> = runCatching {
+        onProgress("Fetching playlist...")
         val playlistUrl = playlistRepository.currentPlaylistUrl()
         val playlist = segmentFetcher.fetchMediaPlaylist(playlistUrl)
         val selected = SegmentSelector.selectForRange(playlist.segments, range.startEpochMs, range.endEpochMs)
@@ -40,14 +46,19 @@ class Media3ClipExporter @Inject constructor(
         val remuxedFile = File(context.cacheDir, "clip_remux_${range.startEpochMs}.mp4")
         val outputFile = File(context.cacheDir, "clip_${range.startEpochMs}.mp4")
         try {
+            onProgress("Downloading ${selected.size} segments...")
             segmentFetcher.downloadConcatenated(playlistUrl, playlist.initSegmentUri, selected, rawFile)
 
-            transcode(input = rawFile, clip = null, output = remuxedFile)
+            transcode(input = rawFile, clip = null, output = remuxedFile) { percent ->
+                onProgress("Preparing (pass 1/2): $percent%")
+            }
 
             val firstSegmentPdt = selected.first().programDateTimeEpochMs
             val startMs = range.startEpochMs - firstSegmentPdt
             val endMs = range.endEpochMs - firstSegmentPdt
-            transcode(input = remuxedFile, clip = startMs to endMs, output = outputFile)
+            transcode(input = remuxedFile, clip = startMs to endMs, output = outputFile) { percent ->
+                onProgress("Trimming (pass 2/2): $percent%")
+            }
 
             outputFile
         } finally {
@@ -56,42 +67,54 @@ class Media3ClipExporter @Inject constructor(
         }
     }
 
-    /** Runs one Transformer pass (transmux, optionally clipped) on the Main thread. */
-    private suspend fun transcode(input: File, clip: Pair<Long, Long>?, output: File) {
+    /** Runs one Transformer pass (transmux, optionally clipped) on the Main thread, reporting progress. */
+    private suspend fun transcode(input: File, clip: Pair<Long, Long>?, output: File, onProgress: (Int) -> Unit) {
         withContext(Dispatchers.Main) {
-            suspendCancellableCoroutine { continuation ->
-                val itemBuilder = MediaItem.Builder().setUri(Uri.fromFile(input))
-                if (clip != null) {
-                    itemBuilder.setClippingConfiguration(
-                        MediaItem.ClippingConfiguration.Builder()
-                            .setStartPositionMs(clip.first)
-                            .setEndPositionMs(clip.second)
-                            .build(),
-                    )
+            val completion = CompletableDeferred<Unit>()
+            val itemBuilder = MediaItem.Builder().setUri(Uri.fromFile(input))
+            if (clip != null) {
+                itemBuilder.setClippingConfiguration(
+                    MediaItem.ClippingConfiguration.Builder()
+                        .setStartPositionMs(clip.first)
+                        .setEndPositionMs(clip.second)
+                        .build(),
+                )
+            }
+
+            val transformer = Transformer.Builder(context)
+                .addListener(
+                    object : Transformer.Listener {
+                        override fun onCompleted(composition: Composition, exportResult: ExportResult) {
+                            Log.d(TAG, "onCompleted $output durationMs=${exportResult.durationMs}")
+                            completion.complete(Unit)
+                        }
+
+                        override fun onError(
+                            composition: Composition,
+                            exportResult: ExportResult,
+                            exportException: ExportException,
+                        ) {
+                            Log.e(TAG, "onError $output", exportException)
+                            completion.completeExceptionally(exportException)
+                        }
+                    },
+                )
+                .build()
+
+            transformer.start(itemBuilder.build(), output.absolutePath)
+
+            try {
+                val progressHolder = ProgressHolder()
+                while (!completion.isCompleted) {
+                    if (transformer.getProgress(progressHolder) == Transformer.PROGRESS_STATE_AVAILABLE) {
+                        onProgress(progressHolder.progress)
+                    }
+                    delay(PROGRESS_POLL_MS)
                 }
-
-                val transformer = Transformer.Builder(context)
-                    .addListener(
-                        object : Transformer.Listener {
-                            override fun onCompleted(composition: Composition, exportResult: ExportResult) {
-                                Log.d(TAG, "onCompleted $output durationMs=${exportResult.durationMs}")
-                                if (continuation.isActive) continuation.resumeWith(Result.success(Unit))
-                            }
-
-                            override fun onError(
-                                composition: Composition,
-                                exportResult: ExportResult,
-                                exportException: ExportException,
-                            ) {
-                                Log.e(TAG, "onError $output", exportException)
-                                if (continuation.isActive) continuation.cancel(exportException)
-                            }
-                        },
-                    )
-                    .build()
-
-                transformer.start(itemBuilder.build(), output.absolutePath)
-                continuation.invokeOnCancellation { transformer.cancel() }
+                completion.await()
+            } catch (e: CancellationException) {
+                transformer.cancel()
+                throw e
             }
         }
     }

@@ -16,5 +16,6 @@ data class ClipRange(val startEpochMs: Long, val endEpochMs: Long) {
  * See the plan's Gate B for the `.ts`-input fallback if Transformer rejects the source.
  */
 interface ClipExporter {
-    suspend fun export(range: ClipRange): Result<File>
+    /** [onProgress] reports a human-readable status (pass + percent) as export proceeds. */
+    suspend fun export(range: ClipRange, onProgress: (String) -> Unit = {}): Result<File>
 }
