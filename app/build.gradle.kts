@@ -1,9 +1,17 @@
+import java.io.FileInputStream
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.ksp)
     alias(libs.plugins.hilt.android)
+}
+
+val localProperties = Properties().apply {
+    val file = rootProject.file("local.properties")
+    if (file.exists()) load(FileInputStream(file))
 }
 
 android {
@@ -18,6 +26,15 @@ android {
         versionName = "0.1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+
+        // Phase 2 spike stand-in: a manually-minted signed playlist URL (~12h TTL), read from
+        // the gitignored local.properties so it never lands in source control. Replaced by the
+        // real login -> access_session -> /api/stream/urls flow in Phase 5/6.
+        buildConfigField(
+            "String",
+            "STREAM_URL",
+            "\"${localProperties.getProperty("STREAM_URL", "")}\"",
+        )
     }
 
     buildTypes {
@@ -38,6 +55,7 @@ android {
 
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 
     ksp {
