@@ -64,25 +64,37 @@ Media3's HLS extractor generally tolerates LL-HLS tags fine for normal (non-low-
 playback, but this should be explicitly verified in Phase 2 rather than assumed — worth watching
 for parser warnings/crashes on the `EXT-X-PART`/`EXT-X-PRELOAD-HINT` tags specifically.
 
-## DVR depth — NOT YET CONFIRMED (Gate A still open)
+## DVR depth — CONFIRMED via server config (Gate A closed)
 
 At probe time, `chunklist_0` (q1080) had **126 segments**, `#EXT-X-MEDIA-SEQUENCE:0`, spanning
-2026-09-17T15:17:56.622Z → 15:30:32.622Z (~12.6 minutes). `MEDIA-SEQUENCE:0` means **no eviction
-has happened yet** — segment 0 is still segment 0. This tells us the OBS stream session backing
-this playlist had only been running ~13 minutes when probed; it does **not** tell us the
-configured max DVR window, because we haven't yet seen the point where old segments start
-dropping off the front.
+2026-09-17T15:17:56.622Z → 15:30:32.622Z (~12.6 minutes) — no eviction had happened yet, so the
+playlist itself couldn't reveal the configured cap. Settled instead by reading the origin's
+OvenMediaEngine `Server.xml`:
 
-**This is the one thing Phase 0 hasn't settled.** Two ways to close it, cheaper first:
+```xml
+<DVR>
+    <Enable>true</Enable>
+    <EventPlaylistType>true</EventPlaylistType>
+    <TempStoragePath>/data/ome_dvr/</TempStoragePath>
+    <MaxDuration>7200</MaxDuration>  <!-- seconds -->
+</DVR>
+```
 
-1. If this is your own OvenMediaEngine instance, check `Server.xml` under the LLHLS publisher
-   config for the segment-count/DVR setting directly — instant answer, zero waiting.
-2. Otherwise, poll the same playlist URL every ~20–30 min until `#EXT-X-MEDIA-SEQUENCE` starts
-   incrementing above 0 — the segment count at that point is the real cap. At 6s/segment, a 2h
-   window is 1200 segments.
+`MaxDuration` is **7200 seconds = exactly 2 hours**, and per an in-repo-adjacent comment on that
+config, the seconds-unit behavior was empirically validated on this exact OME install (v0.20.5) by
+setting `MaxDuration=120` and confirming on-disk segment age spread stayed ~114–120s. High
+confidence this produces a true 2h rolling window in production.
 
-Gate A's fallback (reinstate a local rolling buffer) only triggers if that number comes back much
-smaller than 2h — nothing so far contradicts the 2h assumption, it's just unverified.
+**Gate A is closed. The plan's core assumption — server-side 2h DVR window, no local rolling
+buffer needed — holds.** `PlaylistRepository`/the cut screen should treat scrubback depth as
+config-driven (per the plan) but can default-assume up to 2h.
+
+Bonus finding: this `MaxDuration` was **reduced from 16h to 2h on 2026-09-11** after a real
+incident — at 16h the chunklist grew to ~1.2MB and was polled ~0.6×/sec/viewer, projecting to
+~2.3TB/day at only 40 concurrent viewers. This is direct, already-lived evidence for why the
+plan's "same segment URLs, no cache-busting, no second OBS output" requirements exist — the box
+has already nearly been data-capped by playlist churn once. It's also why the manifest-polling
+line item in Phase 0's brief matters in practice, not just in theory.
 
 ## CDN caching — confirmed, data cap is safe
 
@@ -108,9 +120,17 @@ its full DVR size. Not fatal either way — manifest traffic is small per the si
 
 ## Open items carried into later phases
 
-- **DVR cap confirmation** (see above) — settle before/at the start of Phase 2.
 - **App-side auth path** to get a fresh `access_session` — the `/admin/current-link` route used
   for this probe is not what the shipped app should call. Needs a real login → access-session flow
   wired into `MediaAccountApi`/auth (Phase 5/6 territory, but the *shape* of it — login once,
   re-mint the signed URL before ~12h expiry — should inform `PlaylistRepository`'s design in
   Phase 1's `data/stream/` package now).
+
+## Summary — both gates status at end of Phase 0
+
+| Gate | Question | Status |
+|---|---|---|
+| A | ~2h seekable DVR window? | **Confirmed** — `MaxDuration=7200s` in origin config, empirically validated unit semantics. |
+| B | Can Transformer trim the segments? | **De-risked, not proven** — fMP4/CMAF confirmed (not `.ts`), but still needs the Phase 3 spike to actually run `ClippingConfiguration` against real segments. |
+
+Phase 0 is done. Proceed to Phase 2 (live playback + DVR seek spike) next.
