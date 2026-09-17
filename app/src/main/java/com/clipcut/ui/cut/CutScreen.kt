@@ -16,6 +16,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
@@ -34,8 +35,16 @@ import kotlin.math.absoluteValue
  * reports from the live player -- never a hardcoded window.
  */
 @Composable
-fun CutScreen(modifier: Modifier = Modifier, viewModel: CutViewModel = hiltViewModel()) {
+fun CutScreen(
+    modifier: Modifier = Modifier,
+    viewModel: CutViewModel = hiltViewModel(),
+    onExported: (clipPath: String) -> Unit = {},
+) {
     val state by viewModel.uiState.collectAsState()
+
+    LaunchedEffect(viewModel) {
+        viewModel.exportedClipPath.collect { path -> onExported(path) }
+    }
 
     Column(modifier = modifier.fillMaxSize().background(Color.Black)) {
         Box(modifier = Modifier.weight(1f).fillMaxWidth()) {

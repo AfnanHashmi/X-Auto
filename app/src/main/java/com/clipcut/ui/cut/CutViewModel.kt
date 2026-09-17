@@ -7,6 +7,8 @@ import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.MediaSource
+import com.clipcut.data.db.ClipRecord
+import com.clipcut.data.db.ClipRecordDao
 import com.clipcut.data.stream.PlaylistRepository
 import com.clipcut.data.stream.SegmentFetcher
 import com.clipcut.domain.ClipExporter
@@ -16,7 +18,9 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
@@ -41,6 +45,7 @@ class CutViewModel @Inject constructor(
     private val playlistRepository: PlaylistRepository,
     private val segmentFetcher: SegmentFetcher,
     private val clipExporter: ClipExporter,
+    private val clipRecordDao: ClipRecordDao,
 ) : ViewModel() {
 
     val player: ExoPlayer = ExoPlayer.Builder(context)
@@ -49,6 +54,10 @@ class CutViewModel @Inject constructor(
 
     private val _uiState = MutableStateFlow(CutUiState())
     val uiState: StateFlow<CutUiState> = _uiState.asStateFlow()
+
+    private val _exportedClipPath = MutableSharedFlow<String>(extraBufferCapacity = 1)
+    /** Emits once per successful export; the Cut screen navigates to Caption on each emission. */
+    val exportedClipPath: SharedFlow<String> = _exportedClipPath
 
     // In/out points as wall-clock epoch ms -- stable across the DVR window sliding forward.
     // Null until the first playlist fetch establishes a window to project defaults from.
@@ -174,11 +183,12 @@ class CutViewModel @Inject constructor(
             _uiState.update { it.copy(isExporting = true, statusMessage = "Exporting...") }
             refreshPlaylistWindow() // freshest possible window right before committing to epoch math.
 
-            val result = runCatching {
+            val rangeResult = runCatching {
                 val start = requireNotNull(inPointEpochMs) { "No in point set yet" }
                 val end = requireNotNull(outPointEpochMs) { "No out point set yet" }
                 ClipRange(startEpochMs = start, endEpochMs = end)
-            }.fold(
+            }
+            val result = rangeResult.fold(
                 onSuccess = { range ->
                     clipExporter.export(range) { status ->
                         _uiState.update { it.copy(statusMessage = status) }
@@ -192,6 +202,15 @@ class CutViewModel @Inject constructor(
             // this check, a cancelExport() during export would let this coroutine run to completion
             // anyway and stomp the "Export cancelled" message with a stale "Export failed" one.
             ensureActive()
+
+            result.onSuccess { file ->
+                rangeResult.getOrNull()?.let { range ->
+                    clipRecordDao.insert(
+                        ClipRecord(filePath = file.absolutePath, startEpochMs = range.startEpochMs, endEpochMs = range.endEpochMs),
+                    )
+                }
+                _exportedClipPath.tryEmit(file.absolutePath)
+            }
 
             _uiState.update {
                 it.copy(

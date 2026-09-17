@@ -16,4 +16,7 @@ interface ClipRecordDao {
 
     @Query("SELECT * FROM clip_records ORDER BY id DESC")
     fun observeAll(): Flow<List<ClipRecord>>
+
+    @Query("SELECT * FROM clip_records WHERE filePath = :filePath LIMIT 1")
+    suspend fun findByPath(filePath: String): ClipRecord?
 }
