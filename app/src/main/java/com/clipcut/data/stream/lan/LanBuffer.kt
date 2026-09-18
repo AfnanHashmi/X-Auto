@@ -30,6 +30,12 @@ class LanBuffer @Inject constructor(
     private val outputDir = File(context.cacheDir, "lan_buffer")
     private val chunks = CopyOnWriteArrayList<LanBufferChunk>()
 
+    // Set while a review session is scrubbing over a frozen snapshot of these chunks. Retention
+    // would otherwise happily delete a file out from under the player mid-playback, since it only
+    // knows about elapsed time, not about what's currently on screen.
+    @Volatile
+    private var pinnedFromEpochMs: Long? = null
+
     /** Wraps a fresh [UdpDataSource] per `create()` with a tee to the rolling chunk sink. */
     val dataSourceFactory: DataSource.Factory = DataSource.Factory {
         TeeDataSource(
@@ -40,12 +46,26 @@ class LanBuffer @Inject constructor(
 
     private fun onChunkClosed(chunk: LanBufferChunk) {
         chunks.add(chunk)
-        val cutoff = chunk.endEpochMs - RETENTION_MS
+        val cutoff = minOf(chunk.endEpochMs - RETENTION_MS, pinnedFromEpochMs ?: Long.MAX_VALUE)
         val expired = chunks.filter { it.endEpochMs < cutoff }
         if (expired.isNotEmpty()) {
             chunks.removeAll(expired.toSet())
             expired.forEach { it.file.delete() }
         }
+    }
+
+    /**
+     * Pins retention so nothing at or after [fromEpochMs] is pruned, however long ago it fell
+     * outside the normal 5-minute window -- call when a review session starts scrubbing over a
+     * snapshot of the buffer. [releaseRetentionHold] lets normal pruning resume; anything that
+     * should already have expired is swept on the next chunk close.
+     */
+    fun holdRetention(fromEpochMs: Long) {
+        pinnedFromEpochMs = fromEpochMs
+    }
+
+    fun releaseRetentionHold() {
+        pinnedFromEpochMs = null
     }
 
     /** The currently buffered wall-clock span, or null if nothing has been recorded yet. */

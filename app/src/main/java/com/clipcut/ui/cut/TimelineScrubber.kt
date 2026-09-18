@@ -100,6 +100,12 @@ fun TimelineScrubber(
                 .onSizeChanged { widthPx = it.width.toFloat() }
                 .pointerInput(Unit) {
                     detectTapGestures { offset -> onSeekLive.value(pxToMsLive.value(offset.x)) }
+                }
+                .pointerInput(Unit) {
+                    detectDragGestures { change, _ ->
+                        change.consume()
+                        onSeekLive.value(pxToMsLive.value(change.position.x))
+                    }
                 },
         ) {
             val trackY = size.height / 2f
