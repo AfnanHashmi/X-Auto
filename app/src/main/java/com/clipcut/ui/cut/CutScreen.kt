@@ -127,6 +127,14 @@ fun CutScreen(
             state.statusMessage?.let { message ->
                 Text(text = message, color = Color.White, style = MaterialTheme.typography.bodySmall)
             }
+
+            state.streamWarning?.let { warning ->
+                Text(
+                    text = warning,
+                    color = Color(0xFFFFB74D),
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
         }
     }
 }

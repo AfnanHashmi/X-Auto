@@ -4,10 +4,10 @@ import com.clipcut.BuildConfig
 import javax.inject.Inject
 
 /**
- * Phase 2 spike stand-in: returns a manually-minted URL from `local.properties`.
- *
- * Replaced in Phase 5/6 by an implementation that runs the login -> access_session ->
- * /api/stream/urls flow (see docs/phase0-probe-findings.md) and re-mints before the ~12h expiry.
+ * Returns the q1080 playlist URL. The `policy`/`signature` on it are no longer authoritative --
+ * [StreamSigningInterceptor] replaces them per-request with the currently valid credential, so
+ * this URL's own params only matter as a fallback for when the auth chain can't mint one at all.
+ * That's also why the URL never needs re-baking into the APK when it expires.
  */
 class ConfigPlaylistRepository @Inject constructor() : PlaylistRepository {
     override suspend fun currentPlaylistUrl(): String = BuildConfig.STREAM_URL

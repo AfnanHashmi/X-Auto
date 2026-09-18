@@ -8,6 +8,7 @@ import okhttp3.MultipartBody
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
+import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 import java.io.IOException
@@ -123,7 +124,12 @@ class XApiClient(
             val json = JSONObject().apply {
                 put("text", text)
                 if (!mediaIds.isNullOrEmpty()) {
-                    put("media", JSONObject().put("media_ids", mediaIds))
+                    // Android's org.json JSONObject.put() does NOT auto-convert a Kotlin List to
+                    // a JSON array -- it stores the object as-is and serialization falls back to
+                    // List.toString(), sending the string "[id]" instead of the array [id]. X
+                    // rejected exactly that ("string found, array expected") on the first real
+                    // upload. JSONArray(Collection) builds a genuine JSON array.
+                    put("media", JSONObject().put("media_ids", JSONArray(mediaIds)))
                 }
                 if (quoteTweetId != null) put("quote_tweet_id", quoteTweetId)
             }

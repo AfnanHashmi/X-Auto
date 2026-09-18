@@ -50,6 +50,9 @@ android {
             "X_MAIN_CONSUMER_KEY", "X_MAIN_CONSUMER_SECRET",
             "X_MAIN_ACCESS_TOKEN", "X_MAIN_ACCESS_SECRET",
             "OPENAI_API_KEY",
+            // Stream auth chain: admin/current-link -> access_session -> login -> /api/stream/urls.
+            // Lets the app re-mint the ~12h signed URL itself, since a broadcast window can outlast it.
+            "STREAM_ADMIN_KEY", "STREAM_EMAIL", "STREAM_PASSWORD",
         )) {
             buildConfigField("String", key, "\"${localProperties.getProperty(key, "")}\"")
         }

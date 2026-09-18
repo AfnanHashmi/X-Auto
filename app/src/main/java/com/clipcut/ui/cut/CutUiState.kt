@@ -15,6 +15,8 @@ data class CutUiState(
     val isLive: Boolean = true,
     val isExporting: Boolean = false,
     val statusMessage: String? = null,
+    /** Set only when stream access is close to expiring and re-minting it is failing. */
+    val streamWarning: String? = null,
 ) {
     val selectedDurationMs: Long get() = (outPointMs - inPointMs).coerceAtLeast(0)
 }

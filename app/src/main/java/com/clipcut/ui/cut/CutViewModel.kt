@@ -11,6 +11,7 @@ import com.clipcut.data.db.ClipRecord
 import com.clipcut.data.db.ClipRecordDao
 import com.clipcut.data.stream.PlaylistRepository
 import com.clipcut.data.stream.SegmentFetcher
+import com.clipcut.data.stream.SignedPolicyProvider
 import com.clipcut.domain.ClipExporter
 import com.clipcut.domain.ClipRange
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -52,6 +53,7 @@ class CutViewModel @Inject constructor(
     mediaSourceFactory: MediaSource.Factory,
     private val playlistRepository: PlaylistRepository,
     private val segmentFetcher: SegmentFetcher,
+    private val signedPolicyProvider: SignedPolicyProvider,
     private val clipExporter: ClipExporter,
     private val clipRecordDao: ClipRecordDao,
 ) : ViewModel() {
@@ -130,6 +132,7 @@ class CutViewModel @Inject constructor(
     private suspend fun pollPlaylistWindow() {
         while (viewModelScope.isActive) {
             refreshPlaylistWindow()
+            _uiState.update { it.copy(streamWarning = signedPolicyProvider.warningOrNull()) }
             delay(PLAYLIST_REFRESH_MS)
         }
     }
