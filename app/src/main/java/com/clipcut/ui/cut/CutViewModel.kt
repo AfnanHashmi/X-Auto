@@ -5,12 +5,12 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
+import androidx.media3.common.Timeline
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.MediaSource
 import com.clipcut.data.db.ClipRecord
 import com.clipcut.data.db.ClipRecordDao
 import com.clipcut.data.stream.PlaylistRepository
-import com.clipcut.data.stream.SegmentFetcher
 import com.clipcut.data.stream.SignedPolicyProvider
 import com.clipcut.domain.ClipExporter
 import com.clipcut.domain.ClipRange
@@ -30,7 +30,7 @@ import kotlinx.coroutines.launch
 import javax.inject.Inject
 
 private const val POSITION_POLL_MS = 200L
-private const val PLAYLIST_REFRESH_MS = 8_000L
+private const val STREAM_WARNING_POLL_MS = 8_000L
 private const val LIVE_EDGE_EPSILON_MS = 1_500L
 private const val FRAME_STEP_MS = 33L // fallback (~30fps) when Format.frameRate isn't reported yet.
 private const val DEFAULT_CLIP_SPAN_MS = 15_000L
@@ -38,21 +38,21 @@ private const val MIN_CLIP_SPAN_MS = 1_000L
 private const val DVR_SCRUB_WINDOW_MS = 5 * 60 * 1000L // client-side cap: only the last 5 min is scrubbable/selectable.
 
 /**
- * Wall-clock span of the currently known playlist window; the stable coordinate system for
- * in/out points. [rawStartEpochMs] is the earliest epoch actually buffered by the player (the
- * server's full DVR window) and is only used to map epoch <-> native player position. [startEpochMs]
- * is clamped to the last [DVR_SCRUB_WINDOW_MS] and is what in/out points and the scrubber are
- * projected against, so the app exposes at most a 5-minute scrubbable window client-side even
- * though the server buffers much more.
+ * Wall-clock span of the currently known DVR window, derived from the player's own timeline (see
+ * [CutViewModel.playerEpochOrigin]) -- NOT from a separately-fetched playlist copy. Two independent
+ * fetches of a sliding live playlist diverge (segments age out every ~6s), which was the root cause
+ * of exported clips landing seconds earlier than the selected range while preview looked correct
+ * (preview's epoch<->position round-trip cancelled the error; export's absolute-epoch comparison
+ * against real segment timestamps did not). [startEpochMs] is clamped to the last
+ * [DVR_SCRUB_WINDOW_MS] and is what in/out points and the scrubber are projected against.
  */
-private data class PlaylistWindow(val rawStartEpochMs: Long, val startEpochMs: Long, val endEpochMs: Long)
+private data class PlaylistWindow(val startEpochMs: Long, val endEpochMs: Long)
 
 @HiltViewModel
 class CutViewModel @Inject constructor(
     @ApplicationContext context: Context,
     mediaSourceFactory: MediaSource.Factory,
     private val playlistRepository: PlaylistRepository,
-    private val segmentFetcher: SegmentFetcher,
     private val signedPolicyProvider: SignedPolicyProvider,
     private val clipExporter: ClipExporter,
     private val clipRecordDao: ClipRecordDao,
@@ -83,13 +83,37 @@ class CutViewModel @Inject constructor(
             player.playWhenReady = true
         }
         viewModelScope.launch { pollPlayerState() }
-        viewModelScope.launch { pollPlaylistWindow() }
+        viewModelScope.launch { pollStreamWarning() }
+    }
+
+    /**
+     * The player's own live-window origin: the epoch that `player.currentPosition == 0`
+     * corresponds to. Populated from the HLS playlist's `#EXT-X-PROGRAM-DATE-TIME` (ours has it) --
+     * see `Timeline.Window.windowStartTimeMs`. This must be the ONLY source used to bridge player
+     * position <-> wall clock; a second, independently-fetched copy of the playlist is exactly what
+     * caused the original bug (two snapshots of a sliding window disagree). Read fresh on every
+     * call, never cached, since the window shifts forward continuously.
+     */
+    private fun playerEpochOrigin(): Long? {
+        if (player.currentTimeline.isEmpty) return null
+        val window = player.currentTimeline.getWindow(player.currentMediaItemIndex, Timeline.Window())
+        if (window.isPlaceholder) return null
+        return window.windowStartTimeMs.takeIf { it != C.TIME_UNSET }
     }
 
     private suspend fun pollPlayerState() {
         while (viewModelScope.isActive) {
             val rawDurationMs = player.duration.takeIf { it != C.TIME_UNSET } ?: 0L
             val rawPositionMs = player.currentPosition.coerceIn(0, rawDurationMs.coerceAtLeast(0))
+            val origin = playerEpochOrigin()
+
+            if (origin != null) {
+                val endEpochMs = origin + rawDurationMs
+                playlistWindow = PlaylistWindow(
+                    startEpochMs = (endEpochMs - DVR_SCRUB_WINDOW_MS).coerceAtLeast(origin),
+                    endEpochMs = endEpochMs,
+                )
+            }
             val window = playlistWindow
 
             if (window != null && (inPointEpochMs == null || outPointEpochMs == null)) {
@@ -101,8 +125,8 @@ class CutViewModel @Inject constructor(
             // Expose the clamped (<=5min) window span as "duration" for the scrubber, and project
             // the native player position into that same clamped coordinate system.
             val windowSpanMs = window?.let { (it.endEpochMs - it.startEpochMs).coerceAtLeast(0) } ?: 0L
-            val positionMs = if (window != null) {
-                val playheadEpochMs = window.rawStartEpochMs + rawPositionMs
+            val positionMs = if (window != null && origin != null) {
+                val playheadEpochMs = origin + rawPositionMs
                 (playheadEpochMs - window.startEpochMs).coerceIn(0, windowSpanMs)
             } else {
                 0L
@@ -129,26 +153,10 @@ class CutViewModel @Inject constructor(
         }
     }
 
-    private suspend fun pollPlaylistWindow() {
+    private suspend fun pollStreamWarning() {
         while (viewModelScope.isActive) {
-            refreshPlaylistWindow()
             _uiState.update { it.copy(streamWarning = signedPolicyProvider.warningOrNull()) }
-            delay(PLAYLIST_REFRESH_MS)
-        }
-    }
-
-    private suspend fun refreshPlaylistWindow() {
-        runCatching {
-            val segments = segmentFetcher.fetchMediaPlaylist(playlistRepository.currentPlaylistUrl()).segments
-            if (segments.isNotEmpty()) {
-                val rawStart = segments.first().programDateTimeEpochMs
-                val rawEnd = segments.last().programDateTimeEpochMs + segments.last().durationMs
-                playlistWindow = PlaylistWindow(
-                    rawStartEpochMs = rawStart,
-                    startEpochMs = (rawEnd - DVR_SCRUB_WINDOW_MS).coerceAtLeast(rawStart),
-                    endEpochMs = rawEnd,
-                )
-            }
+            delay(STREAM_WARNING_POLL_MS)
         }
     }
 
@@ -181,9 +189,10 @@ class CutViewModel @Inject constructor(
     fun seekTo(timelineMs: Long) {
         val window = playlistWindow ?: return
         val rawDurationMs = player.duration.takeIf { it != C.TIME_UNSET } ?: return
+        val origin = playerEpochOrigin() ?: return
         val windowSpanMs = (window.endEpochMs - window.startEpochMs).coerceAtLeast(0)
         val epoch = window.startEpochMs + timelineMs.coerceIn(0, windowSpanMs)
-        player.seekTo((epoch - window.rawStartEpochMs).coerceIn(0, rawDurationMs))
+        player.seekTo((epoch - origin).coerceIn(0, rawDurationMs))
     }
 
     fun seekToLive() {
@@ -248,7 +257,6 @@ class CutViewModel @Inject constructor(
     fun export() {
         exportJob = viewModelScope.launch {
             _uiState.update { it.copy(isExporting = true, statusMessage = "Exporting...") }
-            refreshPlaylistWindow() // freshest possible window right before committing to epoch math.
 
             val rangeResult = runCatching {
                 val start = requireNotNull(inPointEpochMs) { "No in point set yet" }
