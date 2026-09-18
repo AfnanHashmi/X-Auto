@@ -21,6 +21,20 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!-- Phase 1 spike (throwaway, see plan doc). Exported only so adb shell am start can launch
+             it directly for testing; not linked from anywhere else in the app. -->
+        <activity
+            android:name=".spike.SpikeUdpActivity"
+            android:exported="true"
+            android:theme="@style/Theme.ClipCut" />
+
+        <!-- LAN low-latency buffer control (Start Buffer / Kill). Standalone, not yet linked from
+             the main nav graph; launch via adb for now, exported only for that. -->
+        <activity
+            android:name=".lan.LanBufferActivity"
+            android:exported="true"
+            android:theme="@style/Theme.ClipCut" />
     </application>
 
 </manifest>
