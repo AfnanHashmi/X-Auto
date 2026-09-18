@@ -17,11 +17,15 @@ class BbLogsCounter @Inject constructor(
 ) {
     private val prefs = context.getSharedPreferences("bb_logs_counter", Context.MODE_PRIVATE)
 
+    /** Reserves and returns the next caption; call [commit] only after the post using it succeeds. */
     @Synchronized
-    fun nextCaption(): String {
+    fun nextCaption(): String = "BB LOGS - %03d".format(prefs.getInt(KEY_COUNTER, 0))
+
+    /** Advances the counter past the value last returned by [nextCaption]. A failed post never calls this. */
+    @Synchronized
+    fun commit() {
         val current = prefs.getInt(KEY_COUNTER, 0)
         prefs.edit { putInt(KEY_COUNTER, (current + 1) % 1000) }
-        return "BB LOGS - %03d".format(current)
     }
 
     private companion object {

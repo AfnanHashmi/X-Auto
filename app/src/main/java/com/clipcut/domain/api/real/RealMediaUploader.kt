@@ -22,6 +22,7 @@ class RealMediaUploader @Inject constructor(
         val handle = mediaAccountClient.getMe().username
         val mediaId = mediaAccountClient.uploadVideo(clipFile)
         val tweet = mediaAccountClient.createTweet(text = bbLogsCounter.nextCaption(), mediaIds = listOf(mediaId))
+        bbLogsCounter.commit() // only advance the counter once the post actually succeeded.
         // The /<handle>/status/<id> permalink form is what X unfurls into a card showing the
         // video and the media account's name; the /i/status/<id> form redirects but is opaque.
         MediaRef(id = tweet.id, url = "https://x.com/$handle/status/${tweet.id}")

@@ -57,20 +57,30 @@ class XApiClient(
                 val read = input.read(buffer)
                 if (read <= 0) break
                 val chunk = buffer.copyOf(read)
+                // OAuth 1.0a (RFC 5849 3.4.1.3.1) only folds body params into the signature base
+                // string for application/x-www-form-urlencoded bodies -- for multipart/form-data
+                // they're excluded, so X would sign without them and reject ours as mismatched.
+                // Query params are always signed, so command/media_id/segment_index go there and
+                // the multipart body carries only the binary chunk.
                 val signedParams = mapOf(
                     "command" to "APPEND",
                     "media_id" to mediaId,
                     "segment_index" to segmentIndex.toString(),
                 )
-                // Multipart file parts are excluded from the OAuth1.0a signature base string --
-                // only the non-file fields above are signed, per the spec.
+                val url = UPLOAD_BASE.toHttpUrl().newBuilder()
+                    .addQueryParameter("command", "APPEND")
+                    .addQueryParameter("media_id", mediaId)
+                    .addQueryParameter("segment_index", segmentIndex.toString())
+                    .build()
                 val body = MultipartBody.Builder().setType(MultipartBody.FORM)
-                    .addFormDataPart("command", "APPEND")
-                    .addFormDataPart("media_id", mediaId)
-                    .addFormDataPart("segment_index", segmentIndex.toString())
                     .addFormDataPart("media", "chunk", chunk.toRequestBody("application/octet-stream".toMediaType()))
                     .build()
-                execute(signedFormRequest("POST", UPLOAD_BASE, signedParams, body))
+                execute(
+                    Request.Builder().url(url)
+                        .header("Authorization", signer.authorizationHeader("POST", UPLOAD_BASE, signedParams))
+                        .post(body)
+                        .build(),
+                )
                 segmentIndex++
             }
         }

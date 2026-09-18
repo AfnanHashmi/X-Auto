@@ -18,7 +18,21 @@ class RealMainAccountApi @Inject constructor(
     @Named("main") private val mainAccountClient: XApiClient,
 ) : MainAccountApi {
     override suspend fun post(caption: String, mediaRef: MediaRef): Result<Unit> = runCatching {
-        mainAccountClient.createTweet(text = "$caption\n\n${mediaRef.url}")
+        mainAccountClient.createTweet(text = buildPostText(caption, mediaRef.url))
         Unit
+    }
+
+    private companion object {
+        const val X_POST_CHAR_LIMIT = 280
+
+        /**
+         * Caption, then a newline, then the media post's URL last. The caption is trimmed to
+         * `280 - url.length - 1` (the 1 being the newline) so the URL is never the thing that
+         * overflows and gets cut.
+         */
+        fun buildPostText(caption: String, url: String): String {
+            val budget = (X_POST_CHAR_LIMIT - url.length - 1).coerceAtLeast(0)
+            return "${caption.take(budget).trimEnd()}\n$url"
+        }
     }
 }

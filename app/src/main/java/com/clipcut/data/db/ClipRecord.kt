@@ -13,4 +13,8 @@ data class ClipRecord(
     val mediaRefId: String? = null,
     val mediaRefUrl: String? = null,
     val posted: Boolean = false,
+    // Set true immediately before calling the post API, cleared right after the call returns
+    // (success or failure). Left true only if the app died mid-call, so a clean failure still
+    // allows a normal retry -- this narrowly flags "we don't actually know what happened".
+    val postAttempted: Boolean = false,
 )
