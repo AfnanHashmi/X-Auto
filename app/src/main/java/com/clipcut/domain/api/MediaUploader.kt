@@ -3,11 +3,10 @@ package com.clipcut.domain.api
 import java.io.File
 
 /**
- * Reference returned by [MediaUploader.upload], threaded into [MainAccountApi.post].
- * [authorHandle] (blank if unknown) is the media account's own @handle, used to credit it in the
- * main account's post when the clip is re-uploaded there natively.
+ * Reference returned by [MediaUploader.upload], threaded into [MainAccountApi.post]. [url] is the
+ * media account's public post permalink -- what the main account's post links to.
  */
-data class MediaRef(val id: String, val url: String, val authorHandle: String = "")
+data class MediaRef(val id: String, val url: String)
 
 /**
  * Uploads an exported clip to the "media" account.

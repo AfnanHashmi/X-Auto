@@ -11,6 +11,7 @@ import com.clipcut.data.db.UndoEntry
 import com.clipcut.data.db.UndoEntryDao
 import com.clipcut.domain.api.CaptionEnhancer
 import com.clipcut.domain.api.MediaAccountApi
+import com.clipcut.domain.api.MediaRef
 import com.clipcut.domain.api.MediaUploader
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -56,12 +57,25 @@ class CaptionViewModel @Inject constructor(
 
     private fun uploadClip() {
         viewModelScope.launch {
+            // Uploading publishes a real post on the media account, so it must happen at most once
+            // per clip -- this ViewModel is recreated on process-death restore, which would
+            // otherwise re-publish the same clip.
+            val existing = clipRecordDao.findByPath(clipPath)
+            if (existing?.mediaRefId != null) {
+                _uiState.update {
+                    it.copy(
+                        isUploading = false,
+                        mediaRef = MediaRef(id = existing.mediaRefId, url = existing.mediaRefUrl.orEmpty()),
+                    )
+                }
+                return@launch
+            }
             _uiState.update { it.copy(isUploading = true) }
             mediaUploader.upload(File(clipPath)).fold(
                 onSuccess = { ref ->
                     _uiState.update { it.copy(isUploading = false, mediaRef = ref) }
                     clipRecordDao.findByPath(clipPath)?.let { record ->
-                        clipRecordDao.update(record.copy(mediaRefId = ref.id))
+                        clipRecordDao.update(record.copy(mediaRefId = ref.id, mediaRefUrl = ref.url))
                     }
                 },
                 onFailure = { e ->

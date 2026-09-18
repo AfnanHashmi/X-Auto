@@ -89,7 +89,6 @@ class MainActivity : ComponentActivity() {
                                 navArgument("caption") { type = NavType.StringType },
                                 navArgument("mediaRefId") { type = NavType.StringType },
                                 navArgument("mediaRefUrl") { type = NavType.StringType },
-                                navArgument("mediaRefAuthorHandle") { type = NavType.StringType },
                             ),
                         ) {
                             PostScreen(

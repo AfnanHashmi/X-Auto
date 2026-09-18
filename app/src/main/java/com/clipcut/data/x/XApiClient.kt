@@ -21,6 +21,7 @@ private const val UPLOAD_BASE = "https://upload.twitter.com/1.1/media/upload.jso
 private const val API_BASE = "https://api.twitter.com/2"
 private const val CHUNK_SIZE = 4 * 1024 * 1024 // 4MB, under X's 5MB-per-chunk recommendation.
 private const val STATUS_POLL_MS = 1000L
+private const val MAX_STATUS_POLLS = 60
 
 /** One X account's worth of API access -- construct one per account (media, main) with its own [signer]. */
 class XApiClient(
@@ -81,7 +82,8 @@ class XApiClient(
     }
 
     private suspend fun awaitProcessed(mediaId: String) {
-        while (true) {
+        // Bounded: a stuck "pending"/"in_progress" state would otherwise poll X forever.
+        repeat(MAX_STATUS_POLLS) {
             val params = mapOf("command" to "STATUS", "media_id" to mediaId)
             val url = UPLOAD_BASE.toHttpUrl().newBuilder()
                 .addQueryParameter("command", "STATUS")
@@ -102,6 +104,7 @@ class XApiClient(
                 )
             }
         }
+        throw XApiException("Media $mediaId still processing after $MAX_STATUS_POLLS status checks")
     }
 
     /** Posts a tweet, optionally attaching uploaded media and/or quote-tweeting another tweet. */

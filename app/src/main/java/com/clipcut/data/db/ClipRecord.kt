@@ -11,5 +11,6 @@ data class ClipRecord(
     val startEpochMs: Long,
     val endEpochMs: Long,
     val mediaRefId: String? = null,
+    val mediaRefUrl: String? = null,
     val posted: Boolean = false,
 )

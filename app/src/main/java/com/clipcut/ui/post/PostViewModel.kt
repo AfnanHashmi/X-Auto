@@ -13,7 +13,6 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
-import java.io.File
 import javax.inject.Inject
 
 @HiltViewModel
@@ -27,8 +26,6 @@ class PostViewModel @Inject constructor(
     private val mediaRef = MediaRef(
         id = Uri.decode(checkNotNull(savedStateHandle["mediaRefId"])),
         url = Uri.decode(checkNotNull(savedStateHandle["mediaRefUrl"])),
-        authorHandle = Uri.decode(checkNotNull(savedStateHandle["mediaRefAuthorHandle"]))
-            .let { if (it == "none") "" else it },
     )
 
     private val _uiState = MutableStateFlow(
@@ -37,9 +34,17 @@ class PostViewModel @Inject constructor(
     val uiState: StateFlow<PostUiState> = _uiState.asStateFlow()
 
     fun post() {
+        // Posting is irreversible and this is called both automatically on screen entry and from
+        // the Retry button, so guard against a second in-flight or repeat post: a duplicate tweet
+        // is exactly the pattern that gets an account flagged.
+        if (_uiState.value.isPosting || _uiState.value.isPosted) return
         viewModelScope.launch {
+            if (clipRecordDao.findByPath(clipPath)?.posted == true) {
+                _uiState.update { it.copy(isPosting = false, isPosted = true) }
+                return@launch
+            }
             _uiState.update { it.copy(isPosting = true, errorMessage = null) }
-            mainAccountApi.post(_uiState.value.caption, File(clipPath), mediaRef).fold(
+            mainAccountApi.post(_uiState.value.caption, mediaRef).fold(
                 onSuccess = {
                     _uiState.update { it.copy(isPosting = false, isPosted = true) }
                     clipRecordDao.findByPath(clipPath)?.let { record ->
