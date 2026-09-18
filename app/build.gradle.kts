@@ -1,17 +1,9 @@
-import java.io.FileInputStream
-import java.util.Properties
-
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.ksp)
     alias(libs.plugins.hilt.android)
-}
-
-val localProperties = Properties().apply {
-    val file = rootProject.file("local.properties")
-    if (file.exists()) load(FileInputStream(file))
 }
 
 android {
@@ -26,36 +18,6 @@ android {
         versionName = "0.1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
-
-        // Phase 2 spike stand-in: a manually-minted signed playlist URL (~12h TTL), read from
-        // the gitignored local.properties so it never lands in source control. Replaced by the
-        // real login -> access_session -> /api/stream/urls flow in Phase 5/6.
-        buildConfigField(
-            "String",
-            "STREAM_URL",
-            "\"${localProperties.getProperty("STREAM_URL", "")}\"",
-        )
-
-        // Real* API credentials, also from local.properties -- never committed. Blank until set,
-        // in which case the Real* implementations fail fast with a clear error rather than making
-        // a request with empty credentials. NOTE: these end up in BuildConfig constants inside the
-        // built APK and can be extracted from it; acceptable for this dev-only, not-distributed
-        // build, but revisit (move behind a backend proxy) before ever shipping this to others.
-        // Each account gets its own consumer key/secret -- some setups use one shared X
-        // developer app with the other account added as a Collaborator, others use a separate
-        // app per account; per-account fields work for either.
-        for (key in listOf(
-            "X_MEDIA_CONSUMER_KEY", "X_MEDIA_CONSUMER_SECRET",
-            "X_MEDIA_ACCESS_TOKEN", "X_MEDIA_ACCESS_SECRET",
-            "X_MAIN_CONSUMER_KEY", "X_MAIN_CONSUMER_SECRET",
-            "X_MAIN_ACCESS_TOKEN", "X_MAIN_ACCESS_SECRET",
-            "OPENAI_API_KEY",
-            // Stream auth chain: admin/current-link -> access_session -> login -> /api/stream/urls.
-            // Lets the app re-mint the ~12h signed URL itself, since a broadcast window can outlast it.
-            "STREAM_ADMIN_KEY", "STREAM_EMAIL", "STREAM_PASSWORD",
-        )) {
-            buildConfigField("String", key, "\"${localProperties.getProperty(key, "")}\"")
-        }
     }
 
     buildTypes {
@@ -76,11 +38,6 @@ android {
 
     buildFeatures {
         compose = true
-        buildConfig = true
-    }
-
-    ksp {
-        arg("room.schemaLocation", "$projectDir/schemas")
     }
 
     packaging {
@@ -97,7 +54,6 @@ dependencies {
     implementation(libs.androidx.lifecycle.runtime.compose)
     implementation(libs.androidx.lifecycle.process)
     implementation(libs.androidx.activity.compose)
-    implementation(libs.androidx.navigation.compose)
 
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.compose.ui)
@@ -109,25 +65,17 @@ dependencies {
 
     implementation(libs.hilt.android)
     ksp(libs.hilt.android.compiler)
-    implementation(libs.androidx.hilt.navigation.compose)
-
-    implementation(libs.androidx.room.runtime)
-    implementation(libs.androidx.room.ktx)
-    ksp(libs.androidx.room.compiler)
 
     implementation(libs.androidx.media3.exoplayer)
-    implementation(libs.androidx.media3.exoplayer.hls)
     implementation(libs.androidx.media3.ui)
     implementation(libs.androidx.media3.ui.compose)
     implementation(libs.androidx.media3.common)
     implementation(libs.androidx.media3.datasource)
-    implementation(libs.androidx.media3.datasource.okhttp)
     implementation(libs.androidx.media3.transformer)
     implementation(libs.androidx.media3.muxer)
     implementation(libs.androidx.media3.extractor)
 
     implementation(libs.kotlinx.coroutines.android)
-    implementation(libs.squareup.okhttp)
 
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)

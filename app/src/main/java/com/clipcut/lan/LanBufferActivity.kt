@@ -57,7 +57,7 @@ private const val DEFAULT_CLIP_SPAN_MS = 15_000L
 private const val MIN_CLIP_SPAN_MS = 1_000L
 
 /**
- * Standalone LAN low-latency buffer control + scrub/export: "Start Buffer" starts
+ * The app's only screen: OBS/UDP low-latency buffer control + scrub/export. "Start Buffer" starts
  * [LanBufferForegroundService], which begins receiving/decoding/recording into [LanBufferSession]
  * immediately and keeps running (behind a persistent notification) independent of whether this
  * screen -- or the app at all -- is open; reopening this screen later just attaches to whatever's
@@ -65,10 +65,9 @@ private const val MIN_CLIP_SPAN_MS = 1_000L
  * window, Preview, and export a real clip via [LanClipExporter] -- verified by checking the result
  * in Movies/ClipCut.
  *
- * Deliberately separate from [com.clipcut.ui.cut.CutScreen]/CutViewModel -- the real clipping tool
- * the user depends on for live broadcasts. The production Cut screen links here via a plain Intent
- * (see its "LAN Mode" button), not through any shared ViewModel or nav-graph state, so this can be
- * exercised and hardened without any risk to that working, tested flow.
+ * The previous online-URL (LLHLS) path this lived alongside -- CutScreen/CutViewModel, plus the
+ * caption/post-to-X pipeline hanging off it -- has been removed. There is no other clipping tool
+ * in this app anymore; export is gallery-only, with no in-app path to posting.
  */
 class LanBufferActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {

@@ -15,8 +15,11 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.ClipCut">
 
+        <!-- The app's only screen: OBS/UDP low-latency buffer control, scrub, preview, export to
+             gallery. The LLHLS online-URL path (and the caption/post-to-X pipeline that hung off
+             it) has been removed entirely; this is the app now, not a side mode. -->
         <activity
-            android:name=".MainActivity"
+            android:name=".lan.LanBufferActivity"
             android:exported="true"
             android:theme="@style/Theme.ClipCut">
             <intent-filter>
@@ -24,20 +27,6 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
-
-        <!-- Phase 1 spike (throwaway, see plan doc). Exported only so adb shell am start can launch
-             it directly for testing; not linked from anywhere else in the app. -->
-        <activity
-            android:name=".spike.SpikeUdpActivity"
-            android:exported="true"
-            android:theme="@style/Theme.ClipCut" />
-
-        <!-- LAN low-latency buffer control (Start Buffer / Kill). Linked from the real Cut screen's
-             "LAN Mode" button; exported="true" is also relied on for adb-launch testing. -->
-        <activity
-            android:name=".lan.LanBufferActivity"
-            android:exported="true"
-            android:theme="@style/Theme.ClipCut" />
 
         <!-- Keeps the UDP receive + rolling-chunk recording alive while the app is backgrounded,
              behind a persistent "running in background" notification; see its own doc comment. -->
