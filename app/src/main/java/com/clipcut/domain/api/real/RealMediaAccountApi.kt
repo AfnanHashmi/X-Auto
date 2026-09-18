@@ -11,7 +11,7 @@ class RealMediaAccountApi @Inject constructor(
     @Named("media") private val mediaAccountClient: XApiClient,
 ) : MediaAccountApi {
     override suspend fun getLatestPost(): Result<Post> = runCatching {
-        val userId = mediaAccountClient.getMyUserId()
+        val userId = mediaAccountClient.getMe().id
         val latest = mediaAccountClient.getRecentTweets(userId, maxResults = 5).firstOrNull()
             ?: error("Media account has no tweets yet")
         Post(

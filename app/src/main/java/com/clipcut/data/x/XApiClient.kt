@@ -13,6 +13,7 @@ import java.io.File
 import java.io.IOException
 
 data class TweetResult(val id: String, val text: String)
+data class XUser(val id: String, val username: String)
 
 class XApiException(message: String) : IOException(message)
 
@@ -125,14 +126,15 @@ class XApiClient(
             TweetResult(id = response.getString("id"), text = response.getString("text"))
         }
 
-    /** The authenticated user's own numeric id (needed for [getRecentTweets]). */
-    suspend fun getMyUserId(): String = withContext(Dispatchers.IO) {
+    /** The authenticated user's own id + @handle (needed for [getRecentTweets] and attribution). */
+    suspend fun getMe(): XUser = withContext(Dispatchers.IO) {
         val url = "$API_BASE/users/me"
         val request = Request.Builder().url(url)
             .header("Authorization", signer.authorizationHeader("GET", url))
             .get()
             .build()
-        JSONObject(execute(request)).getJSONObject("data").getString("id")
+        val data = JSONObject(execute(request)).getJSONObject("data")
+        XUser(id = data.getString("id"), username = data.getString("username"))
     }
 
     suspend fun getRecentTweets(userId: String, maxResults: Int = 5): List<TweetResult> = withContext(Dispatchers.IO) {

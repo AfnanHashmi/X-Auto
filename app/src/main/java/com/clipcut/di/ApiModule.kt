@@ -4,34 +4,32 @@ import com.clipcut.domain.api.CaptionEnhancer
 import com.clipcut.domain.api.MainAccountApi
 import com.clipcut.domain.api.MediaAccountApi
 import com.clipcut.domain.api.MediaUploader
-import com.clipcut.domain.api.fake.FakeCaptionEnhancer
-import com.clipcut.domain.api.fake.FakeMainAccountApi
-import com.clipcut.domain.api.fake.FakeMediaAccountApi
-import com.clipcut.domain.api.fake.FakeMediaUploader
+import com.clipcut.domain.api.real.RealCaptionEnhancer
+import com.clipcut.domain.api.real.RealMainAccountApi
+import com.clipcut.domain.api.real.RealMediaAccountApi
+import com.clipcut.domain.api.real.RealMediaUploader
 import dagger.Binds
 import dagger.Module
 import dagger.hilt.InstallIn
 import dagger.hilt.components.SingletonComponent
 
 /**
- * Binds the four external-API interfaces to their fakes.
- *
- * To go live with a real backend, write the real implementation (e.g. `RealMediaUploader`),
- * swap the type on the right of each `@Binds` function, and delete the corresponding fake.
- * No ViewModel or UI code changes.
+ * Binds the four external-API interfaces to their real implementations, backed by credentials
+ * in `local.properties` (see `XApiModule` / `BuildConfig`). Swap back to a `Fake*` here (see git
+ * history) if you need to develop UI/flow work without hitting real X/OpenAI APIs.
  */
 @Module
 @InstallIn(SingletonComponent::class)
 abstract class ApiModule {
     @Binds
-    abstract fun bindMediaUploader(impl: FakeMediaUploader): MediaUploader
+    abstract fun bindMediaUploader(impl: RealMediaUploader): MediaUploader
 
     @Binds
-    abstract fun bindMediaAccountApi(impl: FakeMediaAccountApi): MediaAccountApi
+    abstract fun bindMediaAccountApi(impl: RealMediaAccountApi): MediaAccountApi
 
     @Binds
-    abstract fun bindMainAccountApi(impl: FakeMainAccountApi): MainAccountApi
+    abstract fun bindMainAccountApi(impl: RealMainAccountApi): MainAccountApi
 
     @Binds
-    abstract fun bindCaptionEnhancer(impl: FakeCaptionEnhancer): CaptionEnhancer
+    abstract fun bindCaptionEnhancer(impl: RealCaptionEnhancer): CaptionEnhancer
 }

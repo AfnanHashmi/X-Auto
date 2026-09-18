@@ -13,6 +13,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import java.io.File
 import javax.inject.Inject
 
 @HiltViewModel
@@ -26,6 +27,8 @@ class PostViewModel @Inject constructor(
     private val mediaRef = MediaRef(
         id = Uri.decode(checkNotNull(savedStateHandle["mediaRefId"])),
         url = Uri.decode(checkNotNull(savedStateHandle["mediaRefUrl"])),
+        authorHandle = Uri.decode(checkNotNull(savedStateHandle["mediaRefAuthorHandle"]))
+            .let { if (it == "none") "" else it },
     )
 
     private val _uiState = MutableStateFlow(
@@ -36,7 +39,7 @@ class PostViewModel @Inject constructor(
     fun post() {
         viewModelScope.launch {
             _uiState.update { it.copy(isPosting = true, errorMessage = null) }
-            mainAccountApi.post(_uiState.value.caption, mediaRef).fold(
+            mainAccountApi.post(_uiState.value.caption, File(clipPath), mediaRef).fold(
                 onSuccess = {
                     _uiState.update { it.copy(isPosting = false, isPosted = true) }
                     clipRecordDao.findByPath(clipPath)?.let { record ->

@@ -22,6 +22,7 @@ class RealMediaUploader @Inject constructor(
     override suspend fun upload(clipFile: File): Result<MediaRef> = runCatching {
         val mediaId = mediaAccountClient.uploadVideo(clipFile)
         val tweet = mediaAccountClient.createTweet(text = bbLogsCounter.nextCaption(), mediaIds = listOf(mediaId))
-        MediaRef(id = tweet.id, url = "https://x.com/i/status/${tweet.id}")
+        val handle = mediaAccountClient.getMe().username
+        MediaRef(id = tweet.id, url = "https://x.com/i/status/${tweet.id}", authorHandle = handle)
     }
 }

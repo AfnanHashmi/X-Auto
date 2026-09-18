@@ -22,8 +22,13 @@ sealed class ClipCutDestination(val route: String) {
         fun createRoute(clipPath: String) = "caption/${Uri.encode(clipPath)}"
     }
 
-    data object Post : ClipCutDestination("post/{clipPath}/{caption}/{mediaRefId}/{mediaRefUrl}") {
+    data object Post : ClipCutDestination(
+        "post/{clipPath}/{caption}/{mediaRefId}/{mediaRefUrl}/{mediaRefAuthorHandle}",
+    ) {
+        // Nav Compose path segments can't be empty, so an unknown handle is encoded as the
+        // sentinel "none" rather than "" -- decoded back to blank in PostViewModel.
         fun createRoute(clipPath: String, caption: String, mediaRef: MediaRef) =
-            "post/${Uri.encode(clipPath)}/${Uri.encode(caption)}/${Uri.encode(mediaRef.id)}/${Uri.encode(mediaRef.url)}"
+            "post/${Uri.encode(clipPath)}/${Uri.encode(caption)}/${Uri.encode(mediaRef.id)}/" +
+                "${Uri.encode(mediaRef.url)}/${Uri.encode(mediaRef.authorHandle.ifBlank { "none" })}"
     }
 }
