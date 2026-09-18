@@ -41,9 +41,13 @@ android {
         // a request with empty credentials. NOTE: these end up in BuildConfig constants inside the
         // built APK and can be extracted from it; acceptable for this dev-only, not-distributed
         // build, but revisit (move behind a backend proxy) before ever shipping this to others.
+        // Each account gets its own consumer key/secret -- some setups use one shared X
+        // developer app with the other account added as a Collaborator, others use a separate
+        // app per account; per-account fields work for either.
         for (key in listOf(
-            "X_CONSUMER_KEY", "X_CONSUMER_SECRET",
+            "X_MEDIA_CONSUMER_KEY", "X_MEDIA_CONSUMER_SECRET",
             "X_MEDIA_ACCESS_TOKEN", "X_MEDIA_ACCESS_SECRET",
+            "X_MAIN_CONSUMER_KEY", "X_MAIN_CONSUMER_SECRET",
             "X_MAIN_ACCESS_TOKEN", "X_MAIN_ACCESS_SECRET",
             "OPENAI_API_KEY",
         )) {

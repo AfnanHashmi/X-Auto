@@ -12,9 +12,8 @@ import javax.inject.Named
 import javax.inject.Singleton
 
 /**
- * One [XApiClient] per X account -- media and main share the developer app's consumer key/secret
- * but each has its own access token/secret (see `RealMediaUploader`'s doc comment for why the two
- * accounts can't share a single client).
+ * One [XApiClient] per X account, each with its own consumer key/secret and access token/secret
+ * (see `RealMediaUploader`'s doc comment for why the two accounts can't share a single client).
  */
 @Module
 @InstallIn(SingletonComponent::class)
@@ -25,8 +24,8 @@ object XApiModule {
     fun provideMediaXApiClient(okHttpClient: OkHttpClient): XApiClient = XApiClient(
         okHttpClient,
         OAuth1aSigner(
-            consumerKey = BuildConfig.X_CONSUMER_KEY,
-            consumerSecret = BuildConfig.X_CONSUMER_SECRET,
+            consumerKey = BuildConfig.X_MEDIA_CONSUMER_KEY,
+            consumerSecret = BuildConfig.X_MEDIA_CONSUMER_SECRET,
             accessToken = BuildConfig.X_MEDIA_ACCESS_TOKEN,
             accessTokenSecret = BuildConfig.X_MEDIA_ACCESS_SECRET,
         ),
@@ -38,8 +37,8 @@ object XApiModule {
     fun provideMainXApiClient(okHttpClient: OkHttpClient): XApiClient = XApiClient(
         okHttpClient,
         OAuth1aSigner(
-            consumerKey = BuildConfig.X_CONSUMER_KEY,
-            consumerSecret = BuildConfig.X_CONSUMER_SECRET,
+            consumerKey = BuildConfig.X_MAIN_CONSUMER_KEY,
+            consumerSecret = BuildConfig.X_MAIN_CONSUMER_SECRET,
             accessToken = BuildConfig.X_MAIN_ACCESS_TOKEN,
             accessTokenSecret = BuildConfig.X_MAIN_ACCESS_SECRET,
         ),
