@@ -222,80 +222,82 @@ private fun LanBufferScreen() {
                     style = MaterialTheme.typography.bodySmall,
                 )
 
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    if (isPreviewing) {
+                if (isPreviewing) {
+                    // Matches the real Cut screen's flow: Export only appears once you've
+                    // committed to a selection via Preview, not sitting next to it upfront.
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
                         OutlinedButton(onClick = { stopPreview() }) { Text("Back to Live") }
-                    } else {
+
                         Button(
                             onClick = {
                                 val lanBuffer = LanBufferSession.currentLanBuffer() ?: return@Button
                                 scope.launch {
-                                    isPreparingPreview = true
-                                    val chunks = lanBuffer.chunksCovering(inEpoch, outEpoch)
-                                    if (chunks == null) {
-                                        statusMessage = "Selection isn't fully buffered yet"
-                                        isPreparingPreview = false
-                                        return@launch
-                                    }
-                                    val file = File(context.cacheDir, "lan_preview_${inEpoch}.ts")
-                                    withContext(Dispatchers.IO) {
-                                        file.outputStream().use { out ->
-                                            chunks.forEach { chunk -> chunk.file.inputStream().use { it.copyTo(out) } }
-                                        }
-                                    }
-                                    val extractorsFactory = ExtractorsFactory { arrayOf(TsExtractor()) }
-                                    val source = ProgressiveMediaSource.Factory({ FileDataSource() }, extractorsFactory)
-                                        .createMediaSource(MediaItem.fromUri(Uri.fromFile(file)))
-                                    previewPlayer = ExoPlayer.Builder(context).build().apply {
-                                        setMediaSource(source)
-                                        repeatMode = Player.REPEAT_MODE_ONE
-                                        prepare()
-                                        playWhenReady = true
-                                    }
-                                    previewFile = file
-                                    // Keep the live buffer running/recording, just silence its audio
-                                    // so it doesn't play under the preview's.
-                                    LanBufferSession.currentPlayer()?.volume = 0f
-                                    isPreviewing = true
-                                    isPreparingPreview = false
+                                    isExporting = true
+                                    LanClipExporter(context)
+                                        .export(lanBuffer, inEpoch, outEpoch) { status -> statusMessage = status }
+                                        .fold(
+                                            onSuccess = { file ->
+                                                statusMessage = "Exported: ${file.name} -- check Movies/ClipCut"
+                                            },
+                                            onFailure = { e -> statusMessage = "Export failed: ${e.message}" },
+                                        )
+                                    isExporting = false
                                 }
                             },
-                            enabled = !isPreparingPreview,
+                            enabled = !isExporting,
                             modifier = Modifier.weight(1f),
                         ) {
-                            if (isPreparingPreview) {
+                            if (isExporting) {
                                 CircularProgressIndicator(modifier = Modifier.padding(end = 8.dp))
                             }
-                            Text("Preview")
+                            Text("Export clip")
                         }
                     }
-
+                } else {
                     Button(
                         onClick = {
                             val lanBuffer = LanBufferSession.currentLanBuffer() ?: return@Button
                             scope.launch {
-                                isExporting = true
-                                LanClipExporter(context)
-                                    .export(lanBuffer, inEpoch, outEpoch) { status -> statusMessage = status }
-                                    .fold(
-                                        onSuccess = { file ->
-                                            statusMessage = "Exported: ${file.name} -- check Movies/ClipCut"
-                                        },
-                                        onFailure = { e -> statusMessage = "Export failed: ${e.message}" },
-                                    )
-                                isExporting = false
+                                isPreparingPreview = true
+                                val chunks = lanBuffer.chunksCovering(inEpoch, outEpoch)
+                                if (chunks == null) {
+                                    statusMessage = "Selection isn't fully buffered yet"
+                                    isPreparingPreview = false
+                                    return@launch
+                                }
+                                val file = File(context.cacheDir, "lan_preview_${inEpoch}.ts")
+                                withContext(Dispatchers.IO) {
+                                    file.outputStream().use { out ->
+                                        chunks.forEach { chunk -> chunk.file.inputStream().use { it.copyTo(out) } }
+                                    }
+                                }
+                                val extractorsFactory = ExtractorsFactory { arrayOf(TsExtractor()) }
+                                val source = ProgressiveMediaSource.Factory({ FileDataSource() }, extractorsFactory)
+                                    .createMediaSource(MediaItem.fromUri(Uri.fromFile(file)))
+                                previewPlayer = ExoPlayer.Builder(context).build().apply {
+                                    setMediaSource(source)
+                                    repeatMode = Player.REPEAT_MODE_ONE
+                                    prepare()
+                                    playWhenReady = true
+                                }
+                                previewFile = file
+                                // Keep the live buffer running/recording, just silence its audio
+                                // so it doesn't play under the preview's.
+                                LanBufferSession.currentPlayer()?.volume = 0f
+                                isPreviewing = true
+                                isPreparingPreview = false
                             }
                         },
-                        enabled = !isExporting,
-                        modifier = Modifier.weight(1f),
+                        enabled = !isPreparingPreview,
+                        modifier = Modifier.fillMaxWidth(),
                     ) {
-                        if (isExporting) {
+                        if (isPreparingPreview) {
                             CircularProgressIndicator(modifier = Modifier.padding(end = 8.dp))
                         }
-                        Text("Export clip")
+                        Text("Preview")
                     }
                 }
             }
