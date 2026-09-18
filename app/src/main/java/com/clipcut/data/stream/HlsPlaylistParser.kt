@@ -31,6 +31,16 @@ object HlsPlaylistParser {
         return lines.drop(streamInfIndex + 1).firstOrNull { it.isNotBlank() && !it.startsWith("#") }
     }
 
+    /**
+     * The URI of the first `#EXT-X-MEDIA:TYPE=AUDIO` rendition in a master playlist, if present.
+     * OvenMediaEngine LLHLS publishes audio as a separate rendition from the video variant(s)
+     * (adaptive-bitrate style), so the video variant's own segments carry no audio track.
+     */
+    fun firstAudioRenditionUri(text: String): String? =
+        text.lines()
+            .firstOrNull { it.startsWith("#EXT-X-MEDIA:") && it.contains("TYPE=AUDIO") }
+            ?.let { quotedAttr(it, "URI") }
+
     fun parseMediaPlaylist(text: String): ParsedMediaPlaylist {
         var initUri: String? = null
         var pendingPdtMs: Long? = null

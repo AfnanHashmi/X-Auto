@@ -27,6 +27,20 @@ class SegmentFetcher @Inject constructor(
         }
 
     /**
+     * The separate audio rendition's media playlist, if [playlistUrl] is a master playlist that
+     * advertises one (`#EXT-X-MEDIA:TYPE=AUDIO`). Returns null when [playlistUrl] is already a
+     * media playlist, or when the master has no separate audio rendition -- callers should treat
+     * either case as "no separate audio track to mux in".
+     */
+    suspend fun fetchAudioMediaPlaylist(playlistUrl: String): ParsedMediaPlaylist? =
+        withContext(Dispatchers.IO) {
+            val text = fetchText(playlistUrl)
+            if (!HlsPlaylistParser.isMasterPlaylist(text)) return@withContext null
+            val audioUri = HlsPlaylistParser.firstAudioRenditionUri(text) ?: return@withContext null
+            HlsPlaylistParser.parseMediaPlaylist(fetchText(resolve(playlistUrl, audioUri)))
+        }
+
+    /**
      * Downloads [initSegmentUri] (if present) followed by [segments], in order, concatenated
      * byte-for-byte into [outputFile]. Consecutive fMP4 segments sharing one init segment are
      * valid to concatenate this way -- each is just another moof/mdat pair for the same track.
