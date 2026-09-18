@@ -35,6 +35,20 @@ android {
             "STREAM_URL",
             "\"${localProperties.getProperty("STREAM_URL", "")}\"",
         )
+
+        // Real* API credentials, also from local.properties -- never committed. Blank until set,
+        // in which case the Real* implementations fail fast with a clear error rather than making
+        // a request with empty credentials. NOTE: these end up in BuildConfig constants inside the
+        // built APK and can be extracted from it; acceptable for this dev-only, not-distributed
+        // build, but revisit (move behind a backend proxy) before ever shipping this to others.
+        for (key in listOf(
+            "X_CONSUMER_KEY", "X_CONSUMER_SECRET",
+            "X_MEDIA_ACCESS_TOKEN", "X_MEDIA_ACCESS_SECRET",
+            "X_MAIN_ACCESS_TOKEN", "X_MAIN_ACCESS_SECRET",
+            "OPENAI_API_KEY",
+        )) {
+            buildConfigField("String", key, "\"${localProperties.getProperty(key, "")}\"")
+        }
     }
 
     buildTypes {
