@@ -47,19 +47,18 @@ import java.net.NetworkInterface
 private const val DEFAULT_CLIP_SPAN_MS = 15_000L
 
 /**
- * The app's only screen: OBS/UDP low-latency buffer control + scrub/export. "Start Buffer" starts
- * [LanBufferForegroundService], which begins receiving/decoding/recording into [LanBufferSession]
- * immediately and keeps running (behind a persistent notification) independent of whether this
- * screen -- or the app at all -- is open; reopening this screen later just attaches to whatever's
- * already running.
+ * The app's only screen: OBS/UDP low-latency buffer control + scrub/export.
  *
- * Two viewing modes, matching the old (pre-LAN) LLHLS Cut screen's workflow as closely as the
- * different backend allows -- see [LanReviewController]'s doc comment for the mechanics:
- * - **Live**: [LanBufferSession]'s own continuously-playing, sub-second-latency player.
- * - **Review**: entered by touching the scrubber at all (drag, tap, or an in/out handle), which
- *   freezes a snapshot of the buffer into a [LanReviewController] presenting it as one continuous,
- *   seekable, pausable timeline -- drag backwards, pause, mark IN, play forward, pause, mark OUT,
- *   Preview, Export. "Jump to live" releases the controller and returns to Live.
+ * There is exactly one video area and one set of controls, always visible once the buffer has any
+ * content -- no hidden gesture reveals anything. Two players share that one video area (a raw,
+ * always-live sub-second UDP player from [LanBufferSession], and a seekable/pausable player over
+ * the recorded buffer from [LanReviewController]), but which one is "current" is an implementation
+ * detail, not a UI mode: pressing Pause, stepping a frame, dragging the timeline, or marking IN/OUT
+ * all transparently start the buffer player at that point if it isn't already running (see
+ * [ensureReviewController] below), and **Jump to live** goes back to the raw feed. "Start Buffer"
+ * starts [LanBufferForegroundService], which begins receiving/decoding/recording immediately and
+ * keeps running (behind a persistent notification) independent of whether this screen -- or the
+ * app at all -- is open; reopening this screen later just attaches to whatever's already running.
  *
  * The previous online-URL (LLHLS) path this lived alongside -- CutScreen/CutViewModel, plus the
  * caption/post-to-X pipeline hanging off it -- has been removed. There is no other clipping tool
@@ -85,19 +84,19 @@ private fun LanBufferScreen() {
     var statusMessage by remember { mutableStateOf<String?>(null) }
     val localIp = remember { findLocalIpv4() ?: "<no wifi address>" }
 
-    var reviewController by remember { mutableStateOf<LanReviewController?>(null) }
+    var bufferController by remember { mutableStateOf<LanReviewController?>(null) }
 
-    fun releaseReview() {
-        reviewController?.release()
-        reviewController = null
+    fun releaseBufferPlayer() {
+        bufferController?.release()
+        bufferController = null
         LanBufferSession.setPreviewMuted(false)
         LanBufferSession.setLiveVideoDecodingEnabled(true)
     }
 
     DisposableEffect(Unit) {
         onDispose {
-            if (reviewController != null) {
-                reviewController?.release()
+            if (bufferController != null) {
+                bufferController?.release()
                 LanBufferSession.setPreviewMuted(false)
                 LanBufferSession.setLiveVideoDecodingEnabled(true)
             }
@@ -149,40 +148,53 @@ private fun LanBufferScreen() {
     }
 
     /**
-     * Any interaction with the scrubber while parked on the live view (no review session yet)
-     * starts one: freezes a snapshot of everything buffered up to right now via
-     * [LanReviewController]. Returns null if there's nothing buffered to review yet.
+     * Returns the buffer player, starting it (paused, parked at the live edge of everything
+     * buffered so far) if it isn't already running. Every control below calls this rather than
+     * checking a "mode" -- there is no mode, just "is the buffer player running yet or not".
      */
-    fun ensureReviewController(): LanReviewController? {
-        reviewController?.let { return it }
+    fun ensureBufferController(): LanReviewController? {
+        bufferController?.let { return it }
         val lanBuffer = LanBufferSession.currentLanBuffer() ?: return null
         val range = lanBuffer.bufferedRange() ?: return null
         val chunks = lanBuffer.chunksCovering(range.first, range.second) ?: return null
-        // The live player's video was never actually shown during review (the PlayerView points
-        // at the review player instead), just silently decoding and contending with it for the
-        // phone's hardware decoder -- disable it here, not just mute audio, or review lags badly.
+        // The live player's video is never actually shown once the buffer player starts (the one
+        // video area points at the buffer player instead), but it would otherwise keep silently
+        // decoding and fighting the buffer player for the phone's one hardware video decoder.
         LanBufferSession.setPreviewMuted(true)
         LanBufferSession.setLiveVideoDecodingEnabled(false)
-        return LanReviewController(context, lanBuffer, chunks).also { reviewController = it }
+        return LanReviewController(context, lanBuffer, chunks).also { bufferController = it }
     }
 
-    val controller = reviewController
+    val controller = bufferController
     val reviewState = if (controller != null) controller.uiState.collectAsState().value else null
+
+    val hasContent = liveWindowStartMs != null || controller != null
+    val windowSpanMs = reviewState?.durationMs
+        ?: ((liveWindowEndMs ?: 0L) - (liveWindowStartMs ?: 0L)).coerceAtLeast(0)
+    val positionMs = reviewState?.positionMs ?: windowSpanMs
+    val inPointMs = reviewState?.inPointMs ?: (windowSpanMs - DEFAULT_CLIP_SPAN_MS).coerceAtLeast(0)
+    val outPointMs = reviewState?.outPointMs ?: windowSpanMs
+    val isPlaying = reviewState?.isPlaying ?: true // the live feed is always playing.
+    val isPreviewing = reviewState?.isPreviewing ?: false
+    val selectedDurationMs = (outPointMs - inPointMs).coerceAtLeast(0)
 
     Column(modifier = Modifier.fillMaxSize().background(Color.Black)) {
         Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
-            when {
-                controller != null -> AndroidView(
+            if (isActive || controller != null) {
+                // One video area, one AndroidView, for the whole lifetime of this screen -- never
+                // two competing AndroidView call sites swapped by a when-branch. Swapping call
+                // sites disposes one PlayerView and creates another without ever telling the
+                // outgoing player to let go of its (now-destroyed) video surface, leaving it
+                // decoding into nowhere. `onRelease` makes sure a player always relinquishes the
+                // surface if this composable itself ever goes away.
+                AndroidView(
                     modifier = Modifier.fillMaxSize(),
                     factory = { ctx -> PlayerView(ctx).apply { useController = false } },
-                    update = { view -> view.player = controller.player },
+                    update = { view -> view.player = controller?.player ?: LanBufferSession.currentPlayer() },
+                    onRelease = { view -> view.player = null },
                 )
-                isActive -> AndroidView(
-                    modifier = Modifier.fillMaxSize(),
-                    factory = { ctx -> PlayerView(ctx).apply { useController = false } },
-                    update = { view -> view.player = LanBufferSession.currentPlayer() },
-                )
-                else -> Text("Buffer not running", color = Color.Gray, modifier = Modifier.padding(24.dp))
+            } else {
+                Text("Buffer not running", color = Color.Gray, modifier = Modifier.padding(24.dp))
             }
         }
         Column(
@@ -201,7 +213,7 @@ private fun LanBufferScreen() {
 
                 OutlinedButton(
                     onClick = {
-                        releaseReview()
+                        releaseBufferPlayer()
                         LanBufferForegroundService.stop(context)
                         isActive = false
                         bufferInfo = "buffer: (none yet)"
@@ -212,135 +224,160 @@ private fun LanBufferScreen() {
                 ) { Text("Kill background processes") }
             }
 
-            if (controller != null && reviewState != null) {
-                // ---- Review mode: one continuous seekable/pausable timeline over the frozen
-                // snapshot -- see LanReviewController for why this replaced the old per-chunk
-                // looping player. ----
-                TimelineScrubber(
-                    durationMs = reviewState.durationMs,
-                    positionMs = reviewState.positionMs,
-                    inPointMs = reviewState.inPointMs,
-                    outPointMs = reviewState.outPointMs,
-                    onSeek = controller::seekTo,
-                    onDragInPoint = controller::dragInPoint,
-                    onDragOutPoint = controller::dragOutPoint,
-                    modifier = Modifier.padding(horizontal = 20.dp),
-                )
-
-                Text(
-                    "Selected: ${reviewState.selectedDurationMs / 1000}s",
-                    color = Color.White,
-                    style = MaterialTheme.typography.bodySmall,
-                )
-
-                if (reviewState.isPreviewing) {
-                    // Matches the old PreviewScreen: only Cancel and Export are visible while
-                    // looping [in, out) -- no transport controls, no scrubber interaction.
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        OutlinedButton(onClick = { controller.exitPreview() }) { Text("Cancel") }
-
-                        Button(
-                            onClick = {
-                                val lanBuffer = LanBufferSession.currentLanBuffer() ?: return@Button
-                                val (inEpoch, outEpoch) = controller.inOutEpochRange()
-                                scope.launch {
-                                    isExporting = true
-                                    LanClipExporter(context)
-                                        .export(lanBuffer, inEpoch, outEpoch) { status -> statusMessage = status }
-                                        .fold(
-                                            onSuccess = { file ->
-                                                statusMessage = "Exported: ${file.name} -- check Movies/ClipCut"
-                                            },
-                                            onFailure = { e -> statusMessage = "Export failed: ${e.message}" },
-                                        )
-                                    isExporting = false
-                                }
-                            },
-                            enabled = !isExporting,
-                            modifier = Modifier.weight(1f),
-                        ) {
-                            if (isExporting) {
-                                CircularProgressIndicator(modifier = Modifier.padding(end = 8.dp))
-                            }
-                            Text("Export clip")
+            TimelineScrubber(
+                durationMs = windowSpanMs,
+                positionMs = positionMs,
+                inPointMs = inPointMs,
+                outPointMs = outPointMs,
+                onSeek = { seekMs ->
+                    val c = controller
+                    if (c != null) {
+                        c.seekTo(seekMs)
+                    } else {
+                        val start = liveWindowStartMs
+                        if (start != null) {
+                            val epoch = start + seekMs
+                            ensureBufferController()?.let { it.seekTo(epoch - it.windowStartEpochMs) }
                         }
                     }
-                } else {
-                    // Transport row, laid out exactly like the old Cut screen: step-back,
-                    // play/pause, step-forward on the left; Jump to live on the right.
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                    ) {
-                        Row {
-                            TextButton(onClick = { controller.stepFrame(forward = false) }) {
-                                Text("|<", color = Color.White)
-                            }
-                            TextButton(onClick = { controller.togglePlayPause() }) {
-                                Text(if (reviewState.isPlaying) "Pause" else "Play", color = Color.White)
-                            }
-                            TextButton(onClick = { controller.stepFrame(forward = true) }) {
-                                Text(">|", color = Color.White)
-                            }
+                },
+                onDragInPoint = { timelineMs ->
+                    val c = controller
+                    if (c != null) {
+                        c.dragInPoint(timelineMs)
+                    } else {
+                        val start = liveWindowStartMs
+                        if (start != null) {
+                            val epoch = start + timelineMs
+                            ensureBufferController()?.let { it.dragInPoint(epoch - it.windowStartEpochMs) }
                         }
-                        OutlinedButton(onClick = { releaseReview() }) { Text("Jump to live") }
                     }
+                },
+                onDragOutPoint = { timelineMs ->
+                    val c = controller
+                    if (c != null) {
+                        c.dragOutPoint(timelineMs)
+                    } else {
+                        val start = liveWindowStartMs
+                        if (start != null) {
+                            val epoch = start + timelineMs
+                            ensureBufferController()?.let { it.dragOutPoint(epoch - it.windowStartEpochMs) }
+                        }
+                    }
+                },
+                modifier = Modifier.padding(horizontal = 20.dp),
+            )
 
-                    // Stamp IN/OUT at wherever the playhead is paused right now, alongside the
-                    // scrubber's own draggable handles for fine adjustment afterwards.
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        OutlinedButton(
-                            onClick = { controller.setInAtPlayhead() },
-                            modifier = Modifier.weight(1f),
-                        ) { Text("Set IN") }
-                        OutlinedButton(
-                            onClick = { controller.setOutAtPlayhead() },
-                            modifier = Modifier.weight(1f),
-                        ) { Text("Set OUT") }
-                    }
+            Text(
+                "Selected: ${selectedDurationMs / 1000}s",
+                color = Color.White,
+                style = MaterialTheme.typography.bodySmall,
+            )
+
+            // Transport row: step-back, play/pause, step-forward on the left; Jump to live on the
+            // right. Always rendered once there's content -- disabled, never hidden, when it can't
+            // do anything yet.
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                Row {
+                    TextButton(
+                        onClick = { ensureBufferController()?.stepFrame(forward = false) },
+                        enabled = hasContent,
+                    ) { Text("|<", color = Color.White) }
+                    TextButton(
+                        onClick = {
+                            val c = controller
+                            if (c == null) ensureBufferController() else c.togglePlayPause()
+                        },
+                        enabled = hasContent,
+                    ) { Text(if (isPlaying) "Pause" else "Play", color = Color.White) }
+                    TextButton(
+                        onClick = { ensureBufferController()?.stepFrame(forward = true) },
+                        enabled = hasContent,
+                    ) { Text(">|", color = Color.White) }
+                }
+                OutlinedButton(
+                    onClick = { releaseBufferPlayer() },
+                    enabled = controller != null,
+                ) { Text("Jump to live") }
+            }
+
+            if (isPreviewing && controller != null) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    OutlinedButton(onClick = { controller.exitPreview() }) { Text("Cancel") }
 
                     Button(
-                        onClick = { controller.enterPreview() },
-                        enabled = reviewState.selectedDurationMs > 0,
-                        modifier = Modifier.fillMaxWidth(),
-                    ) { Text("Preview") }
+                        onClick = {
+                            val lanBuffer = LanBufferSession.currentLanBuffer() ?: return@Button
+                            val (inEpoch, outEpoch) = controller.inOutEpochRange()
+                            scope.launch {
+                                isExporting = true
+                                LanClipExporter(context)
+                                    .export(lanBuffer, inEpoch, outEpoch) { status -> statusMessage = status }
+                                    .fold(
+                                        onSuccess = { file ->
+                                            statusMessage = "Exported: ${file.name} -- check Movies/ClipCut"
+                                        },
+                                        onFailure = { e -> statusMessage = "Export failed: ${e.message}" },
+                                    )
+                                isExporting = false
+                            }
+                        },
+                        enabled = !isExporting,
+                        modifier = Modifier.weight(1f),
+                    ) {
+                        if (isExporting) {
+                            CircularProgressIndicator(modifier = Modifier.padding(end = 8.dp))
+                        }
+                        Text("Export clip")
+                    }
                 }
             } else {
-                // ---- Live mode: no review session yet. The scrubber shows the growing live
-                // window parked at its own edge; touching it at all starts a review session (see
-                // ensureReviewController) with that same gesture applied immediately. ----
-                val start = liveWindowStartMs
-                val end = liveWindowEndMs
-                if (start != null && end != null) {
-                    val windowSpanMs = (end - start).coerceAtLeast(0)
-                    val defaultInMs = (windowSpanMs - DEFAULT_CLIP_SPAN_MS).coerceAtLeast(0)
-
-                    TimelineScrubber(
-                        durationMs = windowSpanMs,
-                        positionMs = windowSpanMs,
-                        inPointMs = defaultInMs,
-                        outPointMs = windowSpanMs,
-                        onSeek = { seekMs ->
-                            val epoch = start + seekMs
-                            ensureReviewController()?.let { it.seekTo(epoch - it.windowStartEpochMs) }
+                // Stamp IN/OUT at wherever the playhead is paused right now, alongside the
+                // scrubber's own draggable handles for fine adjustment afterwards.
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    OutlinedButton(
+                        onClick = {
+                            // Marking IN/OUT while still watching live must never silently freeze
+                            // the picture -- that reads as "the button did nothing" and defeats the
+                            // whole point of the low-latency view. A fresh buffer player starts
+                            // paused by default (right, for a deliberate scrub/pause-there gesture),
+                            // but here the user was just watching, so keep it moving.
+                            val wasLive = controller == null
+                            val c = ensureBufferController() ?: return@OutlinedButton
+                            if (wasLive) c.togglePlayPause()
+                            c.setInAtPlayhead()
+                            statusMessage = "IN marked"
                         },
-                        onDragInPoint = { timelineMs ->
-                            val epoch = start + timelineMs
-                            ensureReviewController()?.let { it.dragInPoint(epoch - it.windowStartEpochMs) }
+                        enabled = hasContent,
+                        modifier = Modifier.weight(1f),
+                    ) { Text("Set IN") }
+                    OutlinedButton(
+                        onClick = {
+                            val wasLive = controller == null
+                            val c = ensureBufferController() ?: return@OutlinedButton
+                            if (wasLive) c.togglePlayPause()
+                            c.setOutAtPlayhead()
+                            statusMessage = "OUT marked"
                         },
-                        onDragOutPoint = { timelineMs ->
-                            val epoch = start + timelineMs
-                            ensureReviewController()?.let { it.dragOutPoint(epoch - it.windowStartEpochMs) }
-                        },
-                        modifier = Modifier.padding(horizontal = 20.dp),
-                    )
+                        enabled = hasContent,
+                        modifier = Modifier.weight(1f),
+                    ) { Text("Set OUT") }
                 }
+
+                Button(
+                    onClick = { ensureBufferController()?.enterPreview() },
+                    enabled = hasContent && selectedDurationMs > 0,
+                    modifier = Modifier.fillMaxWidth(),
+                ) { Text("Preview") }
             }
 
             statusMessage?.let {

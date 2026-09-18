@@ -3,13 +3,12 @@ package com.clipcut.lan
 import android.content.Context
 import android.net.Uri
 import androidx.media3.common.MediaItem
-import androidx.media3.datasource.FileDataSource
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.SeekParameters
-import androidx.media3.exoplayer.source.ConcatenatingMediaSource2
 import androidx.media3.exoplayer.source.ProgressiveMediaSource
 import androidx.media3.extractor.ExtractorsFactory
 import androidx.media3.extractor.ts.TsExtractor
+import com.clipcut.data.stream.lan.ChunkSpanningDataSource
 import com.clipcut.data.stream.lan.LanBuffer
 import com.clipcut.data.stream.lan.LanBufferChunk
 import kotlinx.coroutines.CoroutineScope
@@ -29,36 +28,28 @@ private const val FRAME_STEP_MS = 33L // fallback (~30fps) when Format.frameRate
 private const val DEFAULT_CLIP_SPAN_MS = 15_000L
 private const val MIN_CLIP_SPAN_MS = 1_000L
 
-// ConcatenatingMediaSource2's reported duration is the SUM of the placeholder durations we supply
-// (each chunk's wall-clock span), but a chunk's real decodable media can run a little shorter than
-// its wall-clock span (encode/network jitter) -- a seek landing at or past that real end has no
-// data to show and the player stalls waiting for it forever (black screen, no error, confirmed via
-// SurfaceFlinger logging zero new frames). Keeping every seek target at least this far from the
-// nominal edge is cheap insurance against that, at the cost of never quite reaching the last
-// instant of the buffer.
-private const val SEEK_END_MARGIN_MS = 600L
-
 /**
- * Presents a frozen snapshot of buffered chunks as ONE continuous, seekable timeline -- the fix
- * for the old per-chunk scrub player, which looped a single ~2s file and rebuilt the whole player
- * on every chunk-boundary crossing. Built from [ConcatenatingMediaSource2], whose per-source
- * duration is supplied as each chunk's wall-clock span (`endEpochMs - startEpochMs`); because the
- * chunks are recorded back-to-back with no gaps, the merged timeline's `0..duration` IS the epoch
- * timeline shifted by [windowStartEpochMs] -- no separate epoch-origin lookup is needed the way
- * the old LLHLS `CutViewModel` needed one from `#EXT-X-PROGRAM-DATE-TIME`.
+ * Presents a frozen snapshot of buffered chunks as ONE continuous, seekable timeline, via
+ * [ChunkSpanningDataSource] feeding a single [ProgressiveMediaSource] + single [TsExtractor] --
+ * i.e. one real MPEG-TS stream, not N separate files stitched at the player level. This replaced
+ * an earlier `ConcatenatingMediaSource2`-per-chunk design that stalled (`STATE_BUFFERING`) at
+ * every ~2s chunk boundary, since the player had to open and re-sync a fresh extractor per file;
+ * with one extractor over one spanning source there is nothing to re-sync at all, and seeking
+ * anywhere in the buffer is a real seek against a real PCR-based seek map, not a per-chunk swap.
  *
- * Rejected: a playlist of per-chunk [MediaItem]s via `setMediaSources`. Each item is its own
- * timeline window there -- `currentPosition` resets at every transition and per-item `duration` is
- * often `TIME_UNSET` for headerless raw TS -- reintroducing the same class of bug this replaces.
+ * Because the spanning source's bytes are exactly the chunks' bytes back-to-back with no gaps, the
+ * timeline's `0..duration` IS the epoch timeline shifted by [windowStartEpochMs] -- no separate
+ * epoch-origin lookup is needed the way the old LLHLS `CutViewModel` needed one from
+ * `#EXT-X-PROGRAM-DATE-TIME`.
  *
  * In/out points are tracked as absolute wall-clock epoch millis, exactly like the old
  * `CutViewModel` -- see its class doc (recovered from git history) for why: it's what keeps a
  * selection pinned to the same real moment independent of how position is displayed.
  *
  * The chunk list is a **frozen snapshot** taken at construction, not live-appended -- appending
- * would shift the merged timeline under the user mid-review. [LanBuffer.holdRetention] is engaged
- * for the lifetime of this controller so normal pruning can't delete a chunk out from under
- * playback; [release] lets it resume.
+ * would shift the timeline under the user mid-review. [LanBuffer.holdRetention] is engaged for the
+ * lifetime of this controller so normal pruning can't delete a chunk out from under playback;
+ * [release] lets it resume.
  */
 class LanReviewController(
     context: Context,
@@ -71,11 +62,6 @@ class LanReviewController(
     val windowEndEpochMs: Long = chunks.last().endEpochMs
     private val windowSpanMs = (windowEndEpochMs - windowStartEpochMs).coerceAtLeast(0)
 
-    // The actual ceiling any player.seekTo() call is coerced into -- see SEEK_END_MARGIN_MS.
-    // windowSpanMs itself stays the reported "duration" for the UI/scrubber; only real seeks pull
-    // back from the risky exact edge.
-    private val safeMaxSeekMs = (windowSpanMs - SEEK_END_MARGIN_MS).coerceAtLeast(0)
-
     val player: ExoPlayer = ExoPlayer.Builder(context).build().apply {
         // EXACT (the default) can land before a chunk's first keyframe, since chunks are cut on
         // wall-clock rather than at sync-sample boundaries; CLOSEST_SYNC trades a little precision
@@ -83,22 +69,16 @@ class LanReviewController(
         setSeekParameters(SeekParameters.CLOSEST_SYNC)
 
         val extractorsFactory = ExtractorsFactory { arrayOf(TsExtractor()) }
-        val chunkSourceFactory = ProgressiveMediaSource.Factory({ FileDataSource() }, extractorsFactory)
-        val playlist = ConcatenatingMediaSource2.Builder().apply {
-            chunks.forEach { chunk ->
-                val source = chunkSourceFactory.createMediaSource(MediaItem.fromUri(Uri.fromFile(chunk.file)))
-                // NOTE: this parameter is milliseconds (initialPlaceholderDurationMs), not micros.
-                add(source, chunk.endEpochMs - chunk.startEpochMs)
-            }
-        }.build()
+        val spanningSource = ProgressiveMediaSource.Factory({ ChunkSpanningDataSource(chunks) }, extractorsFactory)
+            .createMediaSource(MediaItem.fromUri(Uri.parse("lanbuffer://window")))
 
-        setMediaSource(playlist)
+        setMediaSource(spanningSource)
         prepare()
         playWhenReady = false
     }
 
     private val _uiState = MutableStateFlow(
-        LanReviewUiState(durationMs = windowSpanMs, positionMs = safeMaxSeekMs, outPointMs = windowSpanMs),
+        LanReviewUiState(durationMs = windowSpanMs, positionMs = windowSpanMs, outPointMs = windowSpanMs),
     )
     val uiState: StateFlow<LanReviewUiState> = _uiState.asStateFlow()
 
@@ -110,9 +90,9 @@ class LanReviewController(
 
     init {
         lanBuffer.holdRetention(windowStartEpochMs)
-        // Start parked near the live edge of the frozen window, paused, matching how the old
-        // screen opened onto the current live position rather than the start of the DVR window.
-        player.seekTo(safeMaxSeekMs)
+        // Start parked at the live edge of the frozen window, paused, matching how the old screen
+        // opened onto the current live position rather than the start of the DVR window.
+        player.seekTo(windowSpanMs)
         updateInOutProjection()
         scope.launch { pollPlayerState() }
     }
@@ -151,7 +131,7 @@ class LanReviewController(
 
     /** [timelineMs] is in the frozen window's `0..durationMs` coordinate system. */
     fun seekTo(timelineMs: Long) {
-        player.seekTo(timelineMs.coerceIn(0, safeMaxSeekMs))
+        player.seekTo(timelineMs.coerceIn(0, windowSpanMs))
     }
 
     fun togglePlayPause() {
@@ -159,16 +139,15 @@ class LanReviewController(
     }
 
     /**
-     * Nudges the raw player position by one frame. Works across a chunk boundary for free: on the
-     * merged [ConcatenatingMediaSource2] timeline there is only one continuous `currentPosition`,
-     * so stepping past 0 or the end of one chunk's span just lands inside the next/previous one --
-     * no special-casing needed, unlike a per-item playlist would require.
+     * Nudges the raw player position by one frame. Works across a chunk boundary for free: with
+     * one continuous stream there is only one `currentPosition`, so stepping past what was a chunk
+     * boundary just lands on the next/previous frame -- no special-casing needed.
      */
     fun stepFrame(forward: Boolean) {
         val frameRate = player.videoFormat?.frameRate?.takeIf { it > 0f && it.isFinite() }
         val stepMs = frameRate?.let { (1000.0 / it).toLong().coerceAtLeast(1L) } ?: FRAME_STEP_MS
         val delta = if (forward) stepMs else -stepMs
-        player.seekTo((player.currentPosition + delta).coerceIn(0, safeMaxSeekMs))
+        player.seekTo((player.currentPosition + delta).coerceIn(0, windowSpanMs))
     }
 
     fun dragInPoint(timelineMs: Long) {

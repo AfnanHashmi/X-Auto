@@ -3,13 +3,22 @@ package com.clipcut.lan
 import android.content.Context
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
+import androidx.media3.common.PlaybackException
+import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.ProgressiveMediaSource
 import androidx.media3.extractor.ExtractorsFactory
 import androidx.media3.extractor.ts.TsExtractor
 import com.clipcut.data.stream.lan.LanBuffer
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 private const val PORT = 5000
+private const val PLAYER_ERROR_RETRY_MS = 5_000L
 
 /**
  * Process-wide singleton owning the LAN low-latency player + rolling buffer, so "Start Buffer" and
@@ -27,6 +36,7 @@ private const val PORT = 5000
 object LanBufferSession {
     private var player: ExoPlayer? = null
     private var lanBuffer: LanBuffer? = null
+    private var sessionScope: CoroutineScope? = null
 
     // Two independent reasons the live player can be silenced: the in-app Preview player taking
     // over audio, and the whole app being backgrounded (see LanBufferForegroundService, which
@@ -45,7 +55,23 @@ object LanBufferSession {
         val source = ProgressiveMediaSource.Factory(buffer.dataSourceFactory, extractorsFactory)
             .createMediaSource(MediaItem.fromUri("udp://0.0.0.0:$PORT"))
 
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
         val newPlayer = ExoPlayer.Builder(context.applicationContext).build().apply {
+            // UdpDataSource has an 8s socket timeout; if the OBS relay drops for longer than that
+            // (it did, more than once, in real testing), the read throws and ExoPlayer moves to a
+            // terminal error state -- it does NOT retry on its own, ever, even once the feed comes
+            // back. Without this, the live view goes black permanently on the first hiccup. Ported
+            // from the old (deleted) LLHLS CutViewModel, which had the identical problem/fix.
+            addListener(
+                object : Player.Listener {
+                    override fun onPlayerError(error: PlaybackException) {
+                        scope.launch {
+                            delay(PLAYER_ERROR_RETRY_MS)
+                            if (player === this@apply) prepare()
+                        }
+                    }
+                },
+            )
             setMediaSource(source)
             prepare()
             playWhenReady = true
@@ -53,11 +79,14 @@ object LanBufferSession {
 
         lanBuffer = buffer
         player = newPlayer
+        sessionScope = scope
         applyVolume()
     }
 
     /** Releases the player (closes the UDP socket), and deletes all recorded chunk files. */
     fun stop() {
+        sessionScope?.cancel()
+        sessionScope = null
         player?.release()
         player = null
         lanBuffer?.clear()
