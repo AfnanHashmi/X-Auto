@@ -1,5 +1,6 @@
 package com.clipcut.ui.cut
 
+import android.content.Intent
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -20,9 +21,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.media3.ui.PlayerView
+import com.clipcut.lan.LanBufferActivity
 import java.util.Locale
 import kotlin.math.absoluteValue
 
@@ -38,6 +41,7 @@ fun CutScreen(
     onPreview: () -> Unit = {},
 ) {
     val state by viewModel.uiState.collectAsState()
+    val context = LocalContext.current
 
     Column(modifier = modifier.fillMaxSize().background(Color.Black)) {
         Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
@@ -108,6 +112,21 @@ fun CutScreen(
                 }
                 OutlinedButton(onClick = viewModel::seekToLive) {
                     Text("Jump to live")
+                }
+            }
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.End,
+            ) {
+                // Plain Activity launch, not a nav-graph route or a CutViewModel branch: LAN mode's
+                // playback model (local recorded buffer, no server DVR) is different enough from
+                // this screen's server-DVR-seek model that sharing state between them isn't worth
+                // the risk to this screen, which the user depends on for live broadcasts.
+                TextButton(
+                    onClick = { context.startActivity(Intent(context, LanBufferActivity::class.java)) },
+                ) {
+                    Text("LAN Mode (low latency)", color = Color(0xFF80CBC4))
                 }
             }
 

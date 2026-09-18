@@ -57,6 +57,8 @@ object LanBufferSession {
 
     fun currentPlayer(): ExoPlayer? = player
 
+    fun currentLanBuffer(): LanBuffer? = lanBuffer
+
     fun bufferedRange(): Pair<Long, Long>? = lanBuffer?.bufferedRange()
 
     fun chunkCount(): Int = lanBuffer?.chunkCount() ?: 0
