@@ -28,6 +28,16 @@ private const val FRAME_STEP_MS = 33L // fallback (~30fps) when Format.frameRate
 private const val DEFAULT_CLIP_SPAN_MS = 15_000L
 private const val MIN_CLIP_SPAN_MS = 1_000L
 
+// windowSpanMs is OUR wall-clock-derived span (sum of chunk file lengths' implied duration), not
+// necessarily the exact decodable duration TsExtractor resolves from the spanning byte stream --
+// those can differ by up to a couple hundred ms (encode/network jitter), same as they could with
+// the old ConcatenatingMediaSource2 placeholder durations. Confirmed by repeated real testing: a
+// seek landing at or past the real end has no data to decode and the player stalls forever (solid
+// black, no error) waiting for data that, being a finite local stream, will never arrive -- most
+// visible on Set IN/Set OUT, which seek to "right now", i.e. exactly the risky edge. Keeping every
+// seek at least this far back is cheap insurance against that.
+private const val SEEK_END_MARGIN_MS = 600L
+
 /**
  * Presents a frozen snapshot of buffered chunks as ONE continuous, seekable timeline, via
  * [ChunkSpanningDataSource] feeding a single [ProgressiveMediaSource] + single [TsExtractor] --
@@ -62,6 +72,11 @@ class LanReviewController(
     val windowEndEpochMs: Long = chunks.last().endEpochMs
     private val windowSpanMs = (windowEndEpochMs - windowStartEpochMs).coerceAtLeast(0)
 
+    // The actual ceiling any player.seekTo() call is coerced into -- see SEEK_END_MARGIN_MS.
+    // windowSpanMs itself stays the reported "duration" for the UI/scrubber; only real seeks pull
+    // back from the risky exact edge.
+    private val safeMaxSeekMs = (windowSpanMs - SEEK_END_MARGIN_MS).coerceAtLeast(0)
+
     val player: ExoPlayer = ExoPlayer.Builder(context).build().apply {
         // EXACT (the default) can land before a chunk's first keyframe, since chunks are cut on
         // wall-clock rather than at sync-sample boundaries; CLOSEST_SYNC trades a little precision
@@ -78,7 +93,7 @@ class LanReviewController(
     }
 
     private val _uiState = MutableStateFlow(
-        LanReviewUiState(durationMs = windowSpanMs, positionMs = windowSpanMs, outPointMs = windowSpanMs),
+        LanReviewUiState(durationMs = windowSpanMs, positionMs = safeMaxSeekMs, outPointMs = windowSpanMs),
     )
     val uiState: StateFlow<LanReviewUiState> = _uiState.asStateFlow()
 
@@ -90,9 +105,9 @@ class LanReviewController(
 
     init {
         lanBuffer.holdRetention(windowStartEpochMs)
-        // Start parked at the live edge of the frozen window, paused, matching how the old screen
-        // opened onto the current live position rather than the start of the DVR window.
-        player.seekTo(windowSpanMs)
+        // Start parked near the live edge of the frozen window, paused, matching how the old
+        // screen opened onto the current live position rather than the start of the DVR window.
+        player.seekTo(safeMaxSeekMs)
         updateInOutProjection()
         scope.launch { pollPlayerState() }
     }
@@ -131,7 +146,7 @@ class LanReviewController(
 
     /** [timelineMs] is in the frozen window's `0..durationMs` coordinate system. */
     fun seekTo(timelineMs: Long) {
-        player.seekTo(timelineMs.coerceIn(0, windowSpanMs))
+        player.seekTo(timelineMs.coerceIn(0, safeMaxSeekMs))
     }
 
     fun togglePlayPause() {
@@ -147,7 +162,7 @@ class LanReviewController(
         val frameRate = player.videoFormat?.frameRate?.takeIf { it > 0f && it.isFinite() }
         val stepMs = frameRate?.let { (1000.0 / it).toLong().coerceAtLeast(1L) } ?: FRAME_STEP_MS
         val delta = if (forward) stepMs else -stepMs
-        player.seekTo((player.currentPosition + delta).coerceIn(0, windowSpanMs))
+        player.seekTo((player.currentPosition + delta).coerceIn(0, safeMaxSeekMs))
     }
 
     fun dragInPoint(timelineMs: Long) {
