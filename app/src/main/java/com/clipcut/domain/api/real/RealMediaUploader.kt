@@ -23,8 +23,9 @@ class RealMediaUploader @Inject constructor(
         val mediaId = mediaAccountClient.uploadVideo(clipFile)
         val tweet = mediaAccountClient.createTweet(text = bbLogsCounter.nextCaption(), mediaIds = listOf(mediaId))
         bbLogsCounter.commit() // only advance the counter once the post actually succeeded.
-        // The /<handle>/status/<id> permalink form is what X unfurls into a card showing the
-        // video and the media account's name; the /i/status/<id> form redirects but is opaque.
-        MediaRef(id = tweet.id, url = "https://x.com/$handle/status/${tweet.id}")
+        // The /video/1 suffix is what makes X unfurl this into an embedded, playable video card;
+        // the bare /<handle>/status/<id> permalink instead unfurled as a plain quote-style link
+        // preview (confirmed empirically -- the bare form was the bug).
+        MediaRef(id = tweet.id, url = "https://x.com/$handle/status/${tweet.id}/video/1")
     }
 }

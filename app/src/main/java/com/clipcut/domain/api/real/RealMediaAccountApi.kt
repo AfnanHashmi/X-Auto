@@ -16,7 +16,9 @@ class RealMediaAccountApi @Inject constructor(
             ?: error("Media account has no tweets yet")
         Post(
             id = latest.id,
-            mediaRef = MediaRef(id = latest.id, url = "https://x.com/i/status/${latest.id}"),
+            // /video/1 is what makes this unfurl as a playable embedded video card, not a plain
+            // link preview -- see RealMediaUploader for where this was confirmed empirically.
+            mediaRef = MediaRef(id = latest.id, url = "https://x.com/i/status/${latest.id}/video/1"),
             caption = latest.text,
         )
     }
