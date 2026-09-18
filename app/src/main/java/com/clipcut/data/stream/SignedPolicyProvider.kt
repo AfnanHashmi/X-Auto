@@ -1,6 +1,10 @@
 package com.clipcut.data.stream
 
+import android.content.Context
 import android.util.Log
+import androidx.core.content.edit
+import com.clipcut.BuildConfig
+import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -30,6 +34,12 @@ private const val MAX_RETRY_BACKOFF_MS = 5 * 60 * 1000L
 
 private const val TAG = "SignedPolicy"
 
+private const val KEY_POLICY = "policy"
+private const val KEY_SIGNATURE = "signature"
+private const val KEY_EXPIRES_AT = "expires_at"
+private const val KEY_LAST_ATTEMPT_AT = "last_attempt_at"
+private const val KEY_CONSECUTIVE_FAILURES = "consecutive_failures"
+
 /**
  * Holds the current stream credential and re-mints it before it expires.
  *
@@ -40,8 +50,17 @@ private const val TAG = "SignedPolicy"
  */
 @Singleton
 class SignedPolicyProvider @Inject constructor(
+    @ApplicationContext context: Context,
     private val authenticator: StreamAuthenticator,
 ) {
+    // Persists the cached credential and the backoff state across process restarts. Without this,
+    // a process restart (Android backgrounding the app, or -- as happened in practice -- several
+    // manual reinstalls during testing) resets consecutiveFailures to 0, so each restart fires a
+    // fresh "attempt 1" at the admin endpoint regardless of how recently a previous process's
+    // attempt failed. Against a rate-limited endpoint, a handful of restarts in a short window is
+    // enough to trip it again even though each individual process respected its own backoff.
+    private val prefs = context.getSharedPreferences("signed_policy", Context.MODE_PRIVATE)
+
     private val mutex = Mutex()
 
     /**
@@ -52,16 +71,26 @@ class SignedPolicyProvider @Inject constructor(
     private val refreshScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     @Volatile
-    private var cached: SignedPolicy? = null
+    private var cached: SignedPolicy? = loadCachedPolicy()
 
     @Volatile
     private var lastFailure: String? = null
 
     @Volatile
-    private var lastAttemptAtMs = 0L
+    private var lastAttemptAtMs = prefs.getLong(KEY_LAST_ATTEMPT_AT, 0L)
 
     @Volatile
-    private var consecutiveFailures = 0
+    private var consecutiveFailures = prefs.getInt(KEY_CONSECUTIVE_FAILURES, 0)
+
+    /**
+     * The manually-minted URL baked into `local.properties`/`BuildConfig.STREAM_URL`, parsed once
+     * as a last-resort credential. Used only when live minting is unavailable (rate-limited, origin
+     * down, network issue) AND there's no cached credential either -- e.g. right after a fresh
+     * install/reinstall, before any live mint has ever succeeded. Without this, that combination
+     * left playback completely broken with nothing to fall back to, even when a perfectly valid
+     * backup signature was sitting right here the whole time.
+     */
+    private val buildConfigFallback: SignedPolicy? = SignedPolicy.parseFromUrl(BuildConfig.STREAM_URL)
 
     /**
      * The credential to sign requests with, minting one if there is none. Returns the existing
@@ -76,14 +105,17 @@ class SignedPolicyProvider @Inject constructor(
             return existing // still valid -- hand it back now, refresh lands on a later request.
         }
         return mutex.withLock {
-            cached?.takeIf { !it.isExpired() } ?: mintRespectingBackoff()
+            cached?.takeIf { !it.isExpired() }
+                ?: mintRespectingBackoff()
+                ?: buildConfigFallback?.takeIf { !it.isExpired() }
+                    ?.also { Log.w(TAG, "live mint unavailable, using BuildConfig.STREAM_URL fallback") }
         }
     }
 
     /** Forces a re-mint, e.g. after the origin rejects the current credential with a 401. */
     suspend fun invalidateAndRefresh(): SignedPolicy? = mutex.withLock {
         cached = null
-        mintRespectingBackoff()
+        mintRespectingBackoff() ?: buildConfigFallback?.takeIf { !it.isExpired() }
     }
 
     /**
@@ -96,19 +128,44 @@ class SignedPolicyProvider @Inject constructor(
         if (consecutiveFailures > 0 && sinceLastAttempt < currentBackoffMs()) return null
 
         lastAttemptAtMs = System.currentTimeMillis()
+        persistBackoffState()
         return runCatching { authenticator.mint() }
             .onSuccess {
                 cached = it
                 lastFailure = null
                 consecutiveFailures = 0
+                persistBackoffState()
+                persistPolicy(it)
                 Log.i(TAG, "minted, expires in ${it.remainingMs() / 60_000}min")
             }
             .onFailure {
                 lastFailure = it.message
                 consecutiveFailures++
+                persistBackoffState()
                 Log.e(TAG, "mint failed (attempt $consecutiveFailures, next in ${currentBackoffMs() / 1000}s): ${it.message}")
             }
             .getOrNull()
+    }
+
+    private fun loadCachedPolicy(): SignedPolicy? {
+        val policy = prefs.getString(KEY_POLICY, null) ?: return null
+        val signature = prefs.getString(KEY_SIGNATURE, null) ?: return null
+        val expiresAtEpochMs = prefs.getLong(KEY_EXPIRES_AT, 0L)
+        // Don't restore one that's already dead -- current() would just mint a fresh one anyway,
+        // and doing it here would mean carrying a useless value through unnecessarily.
+        if (expiresAtEpochMs <= System.currentTimeMillis()) return null
+        return SignedPolicy(policy = policy, signature = signature, expiresAtEpochMs = expiresAtEpochMs)
+    }
+
+    private fun persistPolicy(policy: SignedPolicy) = prefs.edit {
+        putString(KEY_POLICY, policy.policy)
+        putString(KEY_SIGNATURE, policy.signature)
+        putLong(KEY_EXPIRES_AT, policy.expiresAtEpochMs)
+    }
+
+    private fun persistBackoffState() = prefs.edit {
+        putLong(KEY_LAST_ATTEMPT_AT, lastAttemptAtMs)
+        putInt(KEY_CONSECUTIVE_FAILURES, consecutiveFailures)
     }
 
     private fun currentBackoffMs(): Long {

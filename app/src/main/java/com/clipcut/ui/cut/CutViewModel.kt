@@ -5,6 +5,8 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
+import androidx.media3.common.PlaybackException
+import androidx.media3.common.Player
 import androidx.media3.common.Timeline
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.MediaSource
@@ -36,6 +38,7 @@ private const val FRAME_STEP_MS = 33L // fallback (~30fps) when Format.frameRate
 private const val DEFAULT_CLIP_SPAN_MS = 15_000L
 private const val MIN_CLIP_SPAN_MS = 1_000L
 private const val DVR_SCRUB_WINDOW_MS = 5 * 60 * 1000L // client-side cap: only the last 5 min is scrubbable/selectable.
+private const val PLAYER_ERROR_RETRY_MS = 5_000L
 
 /**
  * Wall-clock span of the currently known DVR window, derived from the player's own timeline (see
@@ -76,6 +79,21 @@ class CutViewModel @Inject constructor(
     private var playlistWindow: PlaylistWindow? = null
 
     init {
+        // A single transient error (e.g. a stream credential that was momentarily invalid) leaves
+        // ExoPlayer permanently stopped otherwise -- it does not retry on its own after a fatal
+        // playback error, and it stops issuing requests entirely, which meant this app's own
+        // credential-refresh logic never got another chance to run either (nothing was calling
+        // it). Re-preparing after a short delay lets both recover once the underlying cause clears.
+        player.addListener(
+            object : Player.Listener {
+                override fun onPlayerError(error: PlaybackException) {
+                    viewModelScope.launch {
+                        delay(PLAYER_ERROR_RETRY_MS)
+                        player.prepare()
+                    }
+                }
+            },
+        )
         viewModelScope.launch {
             val url = playlistRepository.currentPlaylistUrl()
             player.setMediaItem(MediaItem.fromUri(url))

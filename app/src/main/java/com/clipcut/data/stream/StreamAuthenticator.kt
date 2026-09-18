@@ -19,7 +19,19 @@ data class SignedPolicy(
     val policy: String,
     val signature: String,
     val expiresAtEpochMs: Long,
-)
+) {
+    companion object {
+        /** Extracts `policy`/`signature` from a signed stream URL and decodes the policy's `url_expire`. */
+        fun parseFromUrl(signedUrl: String): SignedPolicy? = runCatching {
+            val httpUrl = signedUrl.toHttpUrl()
+            val policy = httpUrl.queryParameter("policy") ?: return null
+            val signature = httpUrl.queryParameter("signature") ?: return null
+            val padded = policy.padEnd(policy.length + (4 - policy.length % 4) % 4, '=')
+            val decoded = String(android.util.Base64.decode(padded, android.util.Base64.URL_SAFE))
+            SignedPolicy(policy, signature, JSONObject(decoded).getLong("url_expire"))
+        }.getOrNull()
+    }
+}
 
 /**
  * Mints a fresh [SignedPolicy] by running the origin's auth chain end to end:
@@ -107,20 +119,8 @@ class StreamAuthenticator @Inject constructor(
             .getString("url")
     }
 
-    /** Pulls `policy`/`signature` off the minted URL and decodes the policy's `url_expire`. */
-    private fun parsePolicy(signedUrl: String): SignedPolicy {
-        val httpUrl = signedUrl.toHttpUrl()
-        val policy = httpUrl.queryParameter("policy")
-            ?: throw IOException("Minted URL has no policy param: $signedUrl")
-        val signature = httpUrl.queryParameter("signature")
-            ?: throw IOException("Minted URL has no signature param: $signedUrl")
-
-        val padded = policy.padEnd(policy.length + (4 - policy.length % 4) % 4, '=')
-        val decoded = String(android.util.Base64.decode(padded, android.util.Base64.URL_SAFE))
-        val expiresAt = JSONObject(decoded).getLong("url_expire")
-
-        return SignedPolicy(policy = policy, signature = signature, expiresAtEpochMs = expiresAt)
-    }
+    private fun parsePolicy(signedUrl: String): SignedPolicy =
+        SignedPolicy.parseFromUrl(signedUrl) ?: throw IOException("Couldn't parse policy/signature from $signedUrl")
 
     private fun execute(client: OkHttpClient, request: Request): String = client.newCall(request).execute().use { response ->
         val body = response.body?.string().orEmpty()
