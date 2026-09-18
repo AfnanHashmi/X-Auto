@@ -14,9 +14,11 @@ import dagger.hilt.InstallIn
 import dagger.hilt.components.SingletonComponent
 
 /**
- * Binds the four external-API interfaces to their real implementations, backed by credentials
- * in `local.properties` (see `XApiModule` / `BuildConfig`). Swap back to a `Fake*` here (see git
- * history) if you need to develop UI/flow work without hitting real X/OpenAI APIs.
+ * Binds the four external-API interfaces to their real implementations, backed by credentials in
+ * `local.properties` (see `XApiModule` / `BuildConfig`). Swap to a `Fake*` here (see git history)
+ * if you need to iterate on export/playback logic without hitting real X/OpenAI APIs -- reaching
+ * the Caption screen auto-uploads (`CaptionViewModel.init` -> `uploadClip()`), so every export
+ * test with the real bindings fires a real public post.
  */
 @Module
 @InstallIn(SingletonComponent::class)
