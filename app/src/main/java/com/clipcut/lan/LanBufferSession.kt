@@ -27,6 +27,13 @@ object LanBufferSession {
     private var player: ExoPlayer? = null
     private var lanBuffer: LanBuffer? = null
 
+    // Two independent reasons the live player can be silenced: the in-app Preview player taking
+    // over audio, and the whole app being backgrounded (see LanBufferForegroundService, which
+    // drives the latter off ProcessLifecycleOwner so the stream never makes noise behind other
+    // apps). Either one alone is enough to mute; both must clear to unmute.
+    private var isPreviewMuted = false
+    private var isBackgroundMuted = false
+
     val isActive: Boolean get() = player != null
 
     fun start(context: Context) {
@@ -45,6 +52,7 @@ object LanBufferSession {
 
         lanBuffer = buffer
         player = newPlayer
+        applyVolume()
     }
 
     /** Releases the player (closes the UDP socket), and deletes all recorded chunk files. */
@@ -53,6 +61,8 @@ object LanBufferSession {
         player = null
         lanBuffer?.clear()
         lanBuffer = null
+        isPreviewMuted = false
+        isBackgroundMuted = false
     }
 
     fun currentPlayer(): ExoPlayer? = player
@@ -62,4 +72,18 @@ object LanBufferSession {
     fun bufferedRange(): Pair<Long, Long>? = lanBuffer?.bufferedRange()
 
     fun chunkCount(): Int = lanBuffer?.chunkCount() ?: 0
+
+    fun setPreviewMuted(muted: Boolean) {
+        isPreviewMuted = muted
+        applyVolume()
+    }
+
+    fun setBackgroundMuted(muted: Boolean) {
+        isBackgroundMuted = muted
+        applyVolume()
+    }
+
+    private fun applyVolume() {
+        player?.volume = if (isPreviewMuted || isBackgroundMuted) 0f else 1f
+    }
 }

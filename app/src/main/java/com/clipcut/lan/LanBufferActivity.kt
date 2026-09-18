@@ -1,9 +1,14 @@
 package com.clipcut.lan
 
+import android.Manifest
+import android.content.pm.PackageManager
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -30,6 +35,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.core.content.ContextCompat
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.datasource.FileDataSource
@@ -51,12 +57,13 @@ private const val DEFAULT_CLIP_SPAN_MS = 15_000L
 private const val MIN_CLIP_SPAN_MS = 1_000L
 
 /**
- * Standalone LAN low-latency buffer control + scrub/export: "Start Buffer" begins receiving/
- * decoding/recording immediately via [LanBufferSession], independent of whether this screen is
- * open; reopening this screen later just attaches to whatever's already running. Once the buffer
- * has content, drag in/out points against the growing local window and export a real clip via
- * [LanClipExporter] -- same verification pattern used throughout this project: check the result in
- * Movies/ClipCut, not a live in-app preview (LAN mode has no separate preview player yet).
+ * Standalone LAN low-latency buffer control + scrub/export: "Start Buffer" starts
+ * [LanBufferForegroundService], which begins receiving/decoding/recording into [LanBufferSession]
+ * immediately and keeps running (behind a persistent notification) independent of whether this
+ * screen -- or the app at all -- is open; reopening this screen later just attaches to whatever's
+ * already running. Once the buffer has content, drag in/out points against the growing local
+ * window, Preview, and export a real clip via [LanClipExporter] -- verified by checking the result
+ * in Movies/ClipCut.
  *
  * Deliberately separate from [com.clipcut.ui.cut.CutScreen]/CutViewModel -- the real clipping tool
  * the user depends on for live broadcasts. The production Cut screen links here via a plain Intent
@@ -100,7 +107,7 @@ private fun LanBufferScreen() {
         previewPlayer = null
         previewFile?.delete()
         previewFile = null
-        LanBufferSession.currentPlayer()?.volume = 1f
+        LanBufferSession.setPreviewMuted(false)
         isPreviewing = false
     }
 
@@ -108,7 +115,33 @@ private fun LanBufferScreen() {
         onDispose {
             previewPlayer?.release()
             previewFile?.delete()
-            LanBufferSession.currentPlayer()?.volume = 1f
+            LanBufferSession.setPreviewMuted(false)
+        }
+    }
+
+    // POST_NOTIFICATIONS (API 33+) is what makes the foreground service's "running in background"
+    // notification actually visible -- the service itself still works without it, but the whole
+    // point here is the user can see/trust it's running, so ask for it right before Start Buffer.
+    var pendingStart by remember { mutableStateOf(false) }
+    val notificationPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) {
+        if (pendingStart) {
+            LanBufferForegroundService.start(context)
+            isActive = true
+            pendingStart = false
+        }
+    }
+    fun startBuffer() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) !=
+            PackageManager.PERMISSION_GRANTED
+        ) {
+            pendingStart = true
+            notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+        } else {
+            LanBufferForegroundService.start(context)
+            isActive = true
         }
     }
 
@@ -166,14 +199,14 @@ private fun LanBufferScreen() {
 
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Button(
-                    onClick = { LanBufferSession.start(context); isActive = true },
+                    onClick = { startBuffer() },
                     enabled = !isActive,
                 ) { Text("Start Buffer") }
 
                 OutlinedButton(
                     onClick = {
                         if (isPreviewing) stopPreview()
-                        LanBufferSession.stop()
+                        LanBufferForegroundService.stop(context)
                         isActive = false
                         bufferInfo = "buffer: (none yet)"
                         windowStartMs = null
@@ -286,7 +319,7 @@ private fun LanBufferScreen() {
                                 previewFile = file
                                 // Keep the live buffer running/recording, just silence its audio
                                 // so it doesn't play under the preview's.
-                                LanBufferSession.currentPlayer()?.volume = 0f
+                                LanBufferSession.setPreviewMuted(true)
                                 isPreviewing = true
                                 isPreparingPreview = false
                             }

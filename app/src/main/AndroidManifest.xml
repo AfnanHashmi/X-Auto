@@ -3,6 +3,9 @@
 
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <application
         android:name=".ClipCutApp"
@@ -29,12 +32,19 @@
             android:exported="true"
             android:theme="@style/Theme.ClipCut" />
 
-        <!-- LAN low-latency buffer control (Start Buffer / Kill). Standalone, not yet linked from
-             the main nav graph; launch via adb for now, exported only for that. -->
+        <!-- LAN low-latency buffer control (Start Buffer / Kill). Linked from the real Cut screen's
+             "LAN Mode" button; exported="true" is also relied on for adb-launch testing. -->
         <activity
             android:name=".lan.LanBufferActivity"
             android:exported="true"
             android:theme="@style/Theme.ClipCut" />
+
+        <!-- Keeps the UDP receive + rolling-chunk recording alive while the app is backgrounded,
+             behind a persistent "running in background" notification; see its own doc comment. -->
+        <service
+            android:name=".lan.LanBufferForegroundService"
+            android:exported="false"
+            android:foregroundServiceType="mediaPlayback" />
     </application>
 
 </manifest>
