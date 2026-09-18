@@ -1,5 +1,6 @@
 package com.clipcut.lan
 
+import android.net.Uri
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -17,6 +18,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -28,10 +30,20 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.media3.common.MediaItem
+import androidx.media3.common.Player
+import androidx.media3.datasource.FileDataSource
+import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.source.ProgressiveMediaSource
+import androidx.media3.extractor.ExtractorsFactory
+import androidx.media3.extractor.ts.TsExtractor
 import androidx.media3.ui.PlayerView
 import com.clipcut.ui.cut.TimelineScrubber
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.io.File
 import java.net.Inet4Address
 import java.net.NetworkInterface
 
@@ -74,6 +86,32 @@ private fun LanBufferScreen() {
     var statusMessage by remember { mutableStateOf<String?>(null) }
     val localIp = remember { findLocalIpv4() ?: "<no wifi address>" }
 
+    // Preview plays a separate, short-lived player over a temp concatenation of the selected
+    // chunks -- the live buffer keeps running/recording throughout (never stopped), just muted so
+    // its audio doesn't play under the preview's. "Back to Live" un-mutes it and tears the preview
+    // player down; it never touches LanBufferSession.
+    var isPreviewing by remember { mutableStateOf(false) }
+    var isPreparingPreview by remember { mutableStateOf(false) }
+    var previewPlayer by remember { mutableStateOf<ExoPlayer?>(null) }
+    var previewFile by remember { mutableStateOf<File?>(null) }
+
+    fun stopPreview() {
+        previewPlayer?.release()
+        previewPlayer = null
+        previewFile?.delete()
+        previewFile = null
+        LanBufferSession.currentPlayer()?.volume = 1f
+        isPreviewing = false
+    }
+
+    DisposableEffect(Unit) {
+        onDispose {
+            previewPlayer?.release()
+            previewFile?.delete()
+            LanBufferSession.currentPlayer()?.volume = 1f
+        }
+    }
+
     LaunchedEffect(Unit) {
         while (true) {
             isActive = LanBufferSession.isActive
@@ -102,7 +140,13 @@ private fun LanBufferScreen() {
 
     Column(modifier = Modifier.fillMaxSize().background(Color.Black)) {
         Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
-            if (isActive) {
+            if (isPreviewing) {
+                AndroidView(
+                    modifier = Modifier.fillMaxSize(),
+                    factory = { ctx -> PlayerView(ctx).apply { useController = false } },
+                    update = { view -> view.player = previewPlayer },
+                )
+            } else if (isActive) {
                 AndroidView(
                     modifier = Modifier.fillMaxSize(),
                     factory = { ctx -> PlayerView(ctx).apply { useController = false } },
@@ -128,6 +172,7 @@ private fun LanBufferScreen() {
 
                 OutlinedButton(
                     onClick = {
+                        if (isPreviewing) stopPreview()
                         LanBufferSession.stop()
                         isActive = false
                         bufferInfo = "buffer: (none yet)"
@@ -177,29 +222,81 @@ private fun LanBufferScreen() {
                     style = MaterialTheme.typography.bodySmall,
                 )
 
-                Button(
-                    onClick = {
-                        val lanBuffer = LanBufferSession.currentLanBuffer() ?: return@Button
-                        scope.launch {
-                            isExporting = true
-                            LanClipExporter(context)
-                                .export(lanBuffer, inEpoch, outEpoch) { status -> statusMessage = status }
-                                .fold(
-                                    onSuccess = { file ->
-                                        statusMessage = "Exported: ${file.name} -- check Movies/ClipCut"
-                                    },
-                                    onFailure = { e -> statusMessage = "Export failed: ${e.message}" },
-                                )
-                            isExporting = false
-                        }
-                    },
-                    enabled = !isExporting,
+                Row(
                     modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    if (isExporting) {
-                        CircularProgressIndicator(modifier = Modifier.padding(end = 8.dp))
+                    if (isPreviewing) {
+                        OutlinedButton(onClick = { stopPreview() }) { Text("Back to Live") }
+                    } else {
+                        Button(
+                            onClick = {
+                                val lanBuffer = LanBufferSession.currentLanBuffer() ?: return@Button
+                                scope.launch {
+                                    isPreparingPreview = true
+                                    val chunks = lanBuffer.chunksCovering(inEpoch, outEpoch)
+                                    if (chunks == null) {
+                                        statusMessage = "Selection isn't fully buffered yet"
+                                        isPreparingPreview = false
+                                        return@launch
+                                    }
+                                    val file = File(context.cacheDir, "lan_preview_${inEpoch}.ts")
+                                    withContext(Dispatchers.IO) {
+                                        file.outputStream().use { out ->
+                                            chunks.forEach { chunk -> chunk.file.inputStream().use { it.copyTo(out) } }
+                                        }
+                                    }
+                                    val extractorsFactory = ExtractorsFactory { arrayOf(TsExtractor()) }
+                                    val source = ProgressiveMediaSource.Factory({ FileDataSource() }, extractorsFactory)
+                                        .createMediaSource(MediaItem.fromUri(Uri.fromFile(file)))
+                                    previewPlayer = ExoPlayer.Builder(context).build().apply {
+                                        setMediaSource(source)
+                                        repeatMode = Player.REPEAT_MODE_ONE
+                                        prepare()
+                                        playWhenReady = true
+                                    }
+                                    previewFile = file
+                                    // Keep the live buffer running/recording, just silence its audio
+                                    // so it doesn't play under the preview's.
+                                    LanBufferSession.currentPlayer()?.volume = 0f
+                                    isPreviewing = true
+                                    isPreparingPreview = false
+                                }
+                            },
+                            enabled = !isPreparingPreview,
+                            modifier = Modifier.weight(1f),
+                        ) {
+                            if (isPreparingPreview) {
+                                CircularProgressIndicator(modifier = Modifier.padding(end = 8.dp))
+                            }
+                            Text("Preview")
+                        }
                     }
-                    Text("Export clip")
+
+                    Button(
+                        onClick = {
+                            val lanBuffer = LanBufferSession.currentLanBuffer() ?: return@Button
+                            scope.launch {
+                                isExporting = true
+                                LanClipExporter(context)
+                                    .export(lanBuffer, inEpoch, outEpoch) { status -> statusMessage = status }
+                                    .fold(
+                                        onSuccess = { file ->
+                                            statusMessage = "Exported: ${file.name} -- check Movies/ClipCut"
+                                        },
+                                        onFailure = { e -> statusMessage = "Export failed: ${e.message}" },
+                                    )
+                                isExporting = false
+                            }
+                        },
+                        enabled = !isExporting,
+                        modifier = Modifier.weight(1f),
+                    ) {
+                        if (isExporting) {
+                            CircularProgressIndicator(modifier = Modifier.padding(end = 8.dp))
+                        }
+                        Text("Export clip")
+                    }
                 }
             }
 
