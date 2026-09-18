@@ -105,6 +105,12 @@ class CaptionViewModel @Inject constructor(
         }
     }
 
+    fun deleteTemplate(template: CaptionTemplate) {
+        viewModelScope.launch {
+            captionTemplateDao.delete(template.id)
+        }
+    }
+
     fun enhance() {
         commitManualEdit()
         viewModelScope.launch {

@@ -95,7 +95,12 @@ fun CaptionScreen(
         } else {
             LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 items(state.templates) { template ->
-                    AssistChip(onClick = { viewModel.applyTemplate(template) }, label = { Text(template.title) })
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        AssistChip(onClick = { viewModel.applyTemplate(template) }, label = { Text(template.title) })
+                        TextButton(onClick = { viewModel.deleteTemplate(template) }) {
+                            Text("✕")
+                        }
+                    }
                 }
             }
         }

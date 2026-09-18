@@ -31,7 +31,7 @@ import javax.inject.Inject
 private const val POSITION_POLL_MS = 200L
 private const val PLAYLIST_REFRESH_MS = 8_000L
 private const val LIVE_EDGE_EPSILON_MS = 1_500L
-private const val FRAME_STEP_MS = 33L // ~1 frame at the stream's 30fps; approximate, not decoder-exact.
+private const val FRAME_STEP_MS = 33L // fallback (~30fps) when Format.frameRate isn't reported yet.
 private const val DEFAULT_CLIP_SPAN_MS = 15_000L
 private const val MIN_CLIP_SPAN_MS = 1_000L
 private const val DVR_SCRUB_WINDOW_MS = 5 * 60 * 1000L // client-side cap: only the last 5 min is scrubbable/selectable.
@@ -191,9 +191,19 @@ class CutViewModel @Inject constructor(
         player.playWhenReady = !player.playWhenReady
     }
 
+    /**
+     * Nudges the raw player position by one frame. Deliberately bypasses [seekTo] -- that method's
+     * [timelineMs] argument is in the clamped (<=5min) window-local coordinate system, whereas
+     * [player.currentPosition] is the native, unclamped position; mixing the two would clamp every
+     * step to the window edge instead of nudging by a frame.
+     */
     fun stepFrame(forward: Boolean) {
-        val delta = if (forward) FRAME_STEP_MS else -FRAME_STEP_MS
-        seekTo(player.currentPosition + delta)
+        val rawDurationMs = player.duration.takeIf { it != C.TIME_UNSET } ?: return
+        // Prefer the stream's actual reported frame rate over the ~30fps approximation when available.
+        val frameRate = player.videoFormat?.frameRate?.takeIf { it > 0f && it.isFinite() }
+        val stepMs = frameRate?.let { (1000.0 / it).toLong().coerceAtLeast(1L) } ?: FRAME_STEP_MS
+        val delta = if (forward) stepMs else -stepMs
+        player.seekTo((player.currentPosition + delta).coerceIn(0, rawDurationMs))
     }
 
     fun dragInPoint(timelineMs: Long) {
