@@ -34,9 +34,17 @@ private const val LIVE_EDGE_EPSILON_MS = 1_500L
 private const val FRAME_STEP_MS = 33L // ~1 frame at the stream's 30fps; approximate, not decoder-exact.
 private const val DEFAULT_CLIP_SPAN_MS = 15_000L
 private const val MIN_CLIP_SPAN_MS = 1_000L
+private const val DVR_SCRUB_WINDOW_MS = 5 * 60 * 1000L // client-side cap: only the last 5 min is scrubbable/selectable.
 
-/** Wall-clock span of the currently known playlist window; the stable coordinate system for in/out points. */
-private data class PlaylistWindow(val startEpochMs: Long, val endEpochMs: Long)
+/**
+ * Wall-clock span of the currently known playlist window; the stable coordinate system for
+ * in/out points. [rawStartEpochMs] is the earliest epoch actually buffered by the player (the
+ * server's full DVR window) and is only used to map epoch <-> native player position. [startEpochMs]
+ * is clamped to the last [DVR_SCRUB_WINDOW_MS] and is what in/out points and the scrubber are
+ * projected against, so the app exposes at most a 5-minute scrubbable window client-side even
+ * though the server buffers much more.
+ */
+private data class PlaylistWindow(val rawStartEpochMs: Long, val startEpochMs: Long, val endEpochMs: Long)
 
 @HiltViewModel
 class CutViewModel @Inject constructor(
@@ -78,8 +86,8 @@ class CutViewModel @Inject constructor(
 
     private suspend fun pollPlayerState() {
         while (viewModelScope.isActive) {
-            val durationMs = player.duration.takeIf { it != C.TIME_UNSET } ?: 0L
-            val positionMs = player.currentPosition.coerceIn(0, durationMs.coerceAtLeast(0))
+            val rawDurationMs = player.duration.takeIf { it != C.TIME_UNSET } ?: 0L
+            val rawPositionMs = player.currentPosition.coerceIn(0, rawDurationMs.coerceAtLeast(0))
             val window = playlistWindow
 
             if (window != null && (inPointEpochMs == null || outPointEpochMs == null)) {
@@ -88,15 +96,33 @@ class CutViewModel @Inject constructor(
                 inPointEpochMs = (window.endEpochMs - DEFAULT_CLIP_SPAN_MS).coerceAtLeast(window.startEpochMs)
             }
 
+            // Expose the clamped (<=5min) window span as "duration" for the scrubber, and project
+            // the native player position into that same clamped coordinate system.
+            val windowSpanMs = window?.let { (it.endEpochMs - it.startEpochMs).coerceAtLeast(0) } ?: 0L
+            val positionMs = if (window != null) {
+                val playheadEpochMs = window.rawStartEpochMs + rawPositionMs
+                (playheadEpochMs - window.startEpochMs).coerceIn(0, windowSpanMs)
+            } else {
+                0L
+            }
+
             _uiState.update {
                 it.copy(
-                    durationMs = durationMs,
+                    durationMs = windowSpanMs,
                     positionMs = positionMs,
                     isPlaying = player.isPlaying,
-                    isLive = durationMs > 0 && (durationMs - positionMs) < LIVE_EDGE_EPSILON_MS,
+                    isLive = rawDurationMs > 0 && (rawDurationMs - rawPositionMs) < LIVE_EDGE_EPSILON_MS,
                 )
             }
             updateInOutProjection()
+
+            if (previewLoopActive) {
+                val s = _uiState.value
+                if (s.outPointMs > s.inPointMs && s.positionMs >= s.outPointMs) {
+                    seekTo(s.inPointMs)
+                }
+            }
+
             delay(POSITION_POLL_MS)
         }
     }
@@ -112,9 +138,12 @@ class CutViewModel @Inject constructor(
         runCatching {
             val segments = segmentFetcher.fetchMediaPlaylist(playlistRepository.currentPlaylistUrl()).segments
             if (segments.isNotEmpty()) {
+                val rawStart = segments.first().programDateTimeEpochMs
+                val rawEnd = segments.last().programDateTimeEpochMs + segments.last().durationMs
                 playlistWindow = PlaylistWindow(
-                    startEpochMs = segments.first().programDateTimeEpochMs,
-                    endEpochMs = segments.last().programDateTimeEpochMs + segments.last().durationMs,
+                    rawStartEpochMs = rawStart,
+                    startEpochMs = (rawEnd - DVR_SCRUB_WINDOW_MS).coerceAtLeast(rawStart),
+                    endEpochMs = rawEnd,
                 )
             }
         }
@@ -145,8 +174,13 @@ class CutViewModel @Inject constructor(
     /** Inverse of [projectToTimeline]: a timeline position the user just interacted with -> epoch ms. */
     private fun timelineToEpoch(timelineMs: Long): Long? = playlistWindow?.let { it.startEpochMs + timelineMs }
 
+    /** [timelineMs] is in the clamped (<=5min) window-local coordinate system used by the scrubber. */
     fun seekTo(timelineMs: Long) {
-        player.seekTo(timelineMs.coerceIn(0, player.duration.takeIf { it != C.TIME_UNSET } ?: 0L))
+        val window = playlistWindow ?: return
+        val rawDurationMs = player.duration.takeIf { it != C.TIME_UNSET } ?: return
+        val windowSpanMs = (window.endEpochMs - window.startEpochMs).coerceAtLeast(0)
+        val epoch = window.startEpochMs + timelineMs.coerceIn(0, windowSpanMs)
+        player.seekTo((epoch - window.rawStartEpochMs).coerceIn(0, rawDurationMs))
     }
 
     fun seekToLive() {
@@ -174,6 +208,26 @@ class CutViewModel @Inject constructor(
         val minEpoch = (inPointEpochMs ?: return) + MIN_CLIP_SPAN_MS
         outPointEpochMs = epoch.coerceAtLeast(minEpoch)
         updateInOutProjection()
+    }
+
+    private var previewLoopActive = false
+
+    /** Seeks to the in point and starts looping playback within [in, out) until [exitPreview]. */
+    fun enterPreview() {
+        previewLoopActive = true
+        seekTo(_uiState.value.inPointMs)
+        player.playWhenReady = true
+    }
+
+    fun exitPreview() {
+        previewLoopActive = false
+    }
+
+    /** Abandons the current selection (used when Preview is cancelled) and returns to defaults. */
+    fun resetSelection() {
+        exitPreview()
+        inPointEpochMs = null
+        outPointEpochMs = null
     }
 
     private var exportJob: Job? = null

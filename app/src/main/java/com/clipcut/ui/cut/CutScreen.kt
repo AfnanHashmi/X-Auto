@@ -8,15 +8,12 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.material3.Button
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
@@ -30,21 +27,17 @@ import java.util.Locale
 import kotlin.math.absoluteValue
 
 /**
- * The real cut UI: video surface, a DVR-window-spanning scrubber with draggable in/out handles,
- * frame-step controls, and an export button. Scrubback depth is whatever [CutUiState.durationMs]
- * reports from the live player -- never a hardcoded window.
+ * The real cut UI: video surface, a scrubber (capped client-side to the last 5 minutes of DVR,
+ * see [CutViewModel]) with draggable in/out handles, frame-step controls, and a Preview button
+ * that hands off to [com.clipcut.ui.cut.PreviewScreen] for the actual export/cancel decision.
  */
 @Composable
 fun CutScreen(
     modifier: Modifier = Modifier,
     viewModel: CutViewModel = hiltViewModel(),
-    onExported: (clipPath: String) -> Unit = {},
+    onPreview: () -> Unit = {},
 ) {
     val state by viewModel.uiState.collectAsState()
-
-    LaunchedEffect(viewModel) {
-        viewModel.exportedClipPath.collect { path -> onExported(path) }
-    }
 
     Column(modifier = modifier.fillMaxSize().background(Color.Black)) {
         Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
@@ -123,20 +116,11 @@ fun CutScreen(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 Button(
-                    onClick = viewModel::export,
-                    enabled = !state.isExporting && state.selectedDurationMs > 0,
+                    onClick = onPreview,
+                    enabled = state.selectedDurationMs > 0,
                     modifier = Modifier.weight(1f),
                 ) {
-                    if (state.isExporting) {
-                        CircularProgressIndicator(modifier = Modifier.size(18.dp), color = Color.White)
-                    } else {
-                        Text("Export clip")
-                    }
-                }
-                if (state.isExporting) {
-                    OutlinedButton(onClick = viewModel::cancelExport) {
-                        Text("Cancel")
-                    }
+                    Text("Preview")
                 }
             }
 
@@ -147,7 +131,7 @@ fun CutScreen(
     }
 }
 
-private fun formatMs(ms: Long): String {
+internal fun formatMs(ms: Long): String {
     val totalSeconds = ms.absoluteValue / 1000
     val minutes = totalSeconds / 60
     val seconds = totalSeconds % 60

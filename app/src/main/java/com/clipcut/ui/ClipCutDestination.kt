@@ -10,7 +10,13 @@ import com.clipcut.domain.api.MediaRef
  * single-segment `{arg}` matching.
  */
 sealed class ClipCutDestination(val route: String) {
+    /** Nested graph wrapping [Cut] and [Preview], which share one [com.clipcut.ui.cut.CutViewModel]
+     * instance scoped to this graph's back stack entry. */
+    data object CutFlow : ClipCutDestination("cutFlow")
+
     data object Cut : ClipCutDestination("cut")
+
+    data object Preview : ClipCutDestination("preview")
 
     data object Caption : ClipCutDestination("caption/{clipPath}") {
         fun createRoute(clipPath: String) = "caption/${Uri.encode(clipPath)}"
