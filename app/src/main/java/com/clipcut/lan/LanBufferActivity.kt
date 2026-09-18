@@ -90,10 +90,18 @@ private fun LanBufferScreen() {
     fun releaseReview() {
         reviewController?.release()
         reviewController = null
+        LanBufferSession.setPreviewMuted(false)
+        LanBufferSession.setLiveVideoDecodingEnabled(true)
     }
 
     DisposableEffect(Unit) {
-        onDispose { reviewController?.release() }
+        onDispose {
+            if (reviewController != null) {
+                reviewController?.release()
+                LanBufferSession.setPreviewMuted(false)
+                LanBufferSession.setLiveVideoDecodingEnabled(true)
+            }
+        }
     }
 
     // POST_NOTIFICATIONS (API 33+) is what makes the foreground service's "running in background"
@@ -150,6 +158,11 @@ private fun LanBufferScreen() {
         val lanBuffer = LanBufferSession.currentLanBuffer() ?: return null
         val range = lanBuffer.bufferedRange() ?: return null
         val chunks = lanBuffer.chunksCovering(range.first, range.second) ?: return null
+        // The live player's video was never actually shown during review (the PlayerView points
+        // at the review player instead), just silently decoding and contending with it for the
+        // phone's hardware decoder -- disable it here, not just mute audio, or review lags badly.
+        LanBufferSession.setPreviewMuted(true)
+        LanBufferSession.setLiveVideoDecodingEnabled(false)
         return LanReviewController(context, lanBuffer, chunks).also { reviewController = it }
     }
 

@@ -1,6 +1,7 @@
 package com.clipcut.lan
 
 import android.content.Context
+import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.ProgressiveMediaSource
@@ -85,5 +86,22 @@ object LanBufferSession {
 
     private fun applyVolume() {
         player?.volume = if (isPreviewMuted || isBackgroundMuted) 0f else 1f
+    }
+
+    /**
+     * Disables/re-enables the live player's VIDEO renderer specifically, not the whole player --
+     * while a [LanReviewController] is active it has its own separate ExoPlayer decoding the same
+     * broadcast, and this live player's video was never actually visible during review (the
+     * PlayerView is pointed at the review player instead), just silently still decoding and
+     * fighting the review player for the phone's hardware video decoder. That contention is what
+     * caused real, reported lag. Disabling the track leaves the underlying chunk loading --
+     * `RollingChunkDataSink` taps raw bytes as they're read, upstream of decoding -- and audio
+     * completely unaffected, so recording keeps working exactly as before.
+     */
+    fun setLiveVideoDecodingEnabled(enabled: Boolean) {
+        val p = player ?: return
+        p.trackSelectionParameters = p.trackSelectionParameters.buildUpon()
+            .setTrackTypeDisabled(C.TRACK_TYPE_VIDEO, !enabled)
+            .build()
     }
 }
