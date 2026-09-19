@@ -4,34 +4,33 @@ import com.clipcut.domain.api.CaptionEnhancer
 import com.clipcut.domain.api.MainAccountApi
 import com.clipcut.domain.api.MediaAccountApi
 import com.clipcut.domain.api.MediaUploader
-import com.clipcut.domain.api.real.RealCaptionEnhancer
-import com.clipcut.domain.api.real.RealMainAccountApi
-import com.clipcut.domain.api.real.RealMediaAccountApi
-import com.clipcut.domain.api.real.RealMediaUploader
+import com.clipcut.domain.api.fake.FakeCaptionEnhancer
+import com.clipcut.domain.api.fake.FakeMainAccountApi
+import com.clipcut.domain.api.fake.FakeMediaAccountApi
+import com.clipcut.domain.api.fake.FakeMediaUploader
 import dagger.Binds
 import dagger.Module
 import dagger.hilt.InstallIn
 import dagger.hilt.components.SingletonComponent
 
 /**
- * Binds the four external-API interfaces to their real implementations, backed by credentials in
- * `local.properties` (see `XApiModule` / `BuildConfig`). Swap to a `Fake*` here (`domain.api.fake`)
- * if you need to iterate on export/playback logic without hitting real X/OpenAI APIs -- reaching
- * the Caption screen auto-uploads (`CaptionViewModel.init` -> `uploadClip()`), so every export
- * test with the real bindings fires a real public post.
+ * Binds the four external-API interfaces to their FAKE implementations, for testing. Reaching the
+ * Caption screen auto-uploads (`CaptionViewModel.init` -> `uploadClip()`), so with the real
+ * bindings every export fires a real public post. To go live, swap each binding to its `Real*`
+ * counterpart in `domain.api.real` (backed by credentials in `local.properties`, see `XApiModule`).
  */
 @Module
 @InstallIn(SingletonComponent::class)
 abstract class ApiModule {
     @Binds
-    abstract fun bindMediaUploader(impl: RealMediaUploader): MediaUploader
+    abstract fun bindMediaUploader(impl: FakeMediaUploader): MediaUploader
 
     @Binds
-    abstract fun bindMediaAccountApi(impl: RealMediaAccountApi): MediaAccountApi
+    abstract fun bindMediaAccountApi(impl: FakeMediaAccountApi): MediaAccountApi
 
     @Binds
-    abstract fun bindMainAccountApi(impl: RealMainAccountApi): MainAccountApi
+    abstract fun bindMainAccountApi(impl: FakeMainAccountApi): MainAccountApi
 
     @Binds
-    abstract fun bindCaptionEnhancer(impl: RealCaptionEnhancer): CaptionEnhancer
+    abstract fun bindCaptionEnhancer(impl: FakeCaptionEnhancer): CaptionEnhancer
 }
