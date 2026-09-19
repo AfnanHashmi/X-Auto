@@ -8,6 +8,10 @@ import okhttp3.MultipartBody
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
+import com.clipcut.domain.deletion.TimelinePage
+import com.clipcut.domain.deletion.parseTimelinePage
+import java.time.Instant
+import java.time.temporal.ChronoUnit
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
@@ -16,8 +20,30 @@ import java.io.IOException
 data class TweetResult(val id: String, val text: String)
 data class XUser(val id: String, val username: String)
 
+/** What X said about its rate limits on a response; any field may be absent. */
+data class XRateLimit(
+    val limit: Int? = null,
+    val remaining: Int? = null,
+    val resetEpochSec: Long? = null, // x-rate-limit-reset: absolute, epoch seconds
+    val retryAfterSec: Long? = null, // Retry-After: seconds from now
+) {
+    /** When the limit lifts, in epoch seconds: the reset header, else now + Retry-After, else unknown. */
+    fun resetAt(nowEpochSec: Long): Long? = resetEpochSec ?: retryAfterSec?.let { nowEpochSec + it }
+
+    companion object {
+        fun from(header: (String) -> String?) = XRateLimit(
+            limit = header("x-rate-limit-limit")?.trim()?.toIntOrNull(),
+            remaining = header("x-rate-limit-remaining")?.trim()?.toIntOrNull(),
+            resetEpochSec = header("x-rate-limit-reset")?.trim()?.toLongOrNull(),
+            retryAfterSec = header("retry-after")?.trim()?.toLongOrNull(),
+        )
+    }
+}
+
 /** [httpCode] is set when X answered with a non-2xx status (a definitive reply, unless 5xx). */
-class XApiException(message: String, val httpCode: Int? = null) : IOException(message)
+class XApiException(message: String, val httpCode: Int? = null, val rateLimit: XRateLimit? = null) : IOException(message)
+
+data class XDeleteResult(val deleted: Boolean, val rateLimit: XRateLimit)
 
 private const val UPLOAD_BASE = "https://upload.twitter.com/1.1/media/upload.json"
 private const val API_BASE = "https://api.twitter.com/2"
@@ -172,6 +198,69 @@ class XApiClient(
         }
     }
 
+    /**
+     * One page of this account's own timeline inside [start, end], replies and retweets excluded
+     * server-side (callers still re-check). Read-only.
+     *
+     * Every query parameter is signed AND put on the wire in the same RFC 3986 encoding, so the
+     * signature base string and the URL can never disagree -- `exclude=replies,retweets` contains a
+     * comma, exactly the kind of character an encoder mismatch breaks.
+     */
+    suspend fun getTimelinePage(
+        userId: String,
+        start: Instant,
+        end: Instant,
+        paginationToken: String? = null,
+        maxResults: Int = 100,
+    ): TimelinePage = withContext(Dispatchers.IO) {
+        val baseUrl = "$API_BASE/users/$userId/tweets"
+        val params = buildMap {
+            put("max_results", maxResults.coerceIn(5, 100).toString())
+            put("start_time", start.truncatedTo(ChronoUnit.SECONDS).toString())
+            put("end_time", end.truncatedTo(ChronoUnit.SECONDS).toString())
+            put("exclude", "replies,retweets")
+            put("tweet.fields", "created_at,referenced_tweets")
+            paginationToken?.let { put("pagination_token", it) }
+        }
+        val url = baseUrl.toHttpUrl().newBuilder().apply {
+            params.forEach { (k, v) ->
+                addEncodedQueryParameter(OAuth1aSigner.percentEncode(k), OAuth1aSigner.percentEncode(v))
+            }
+        }.build()
+        val request = Request.Builder().url(url)
+            .header("Authorization", signer.authorizationHeader("GET", baseUrl, params))
+            .get()
+            .build()
+        parseTimelinePage(execute(request))
+    }
+
+    /**
+     * Deletes one post by id. The id is in the path, so only the oauth_* params are signed. Throws
+     * [XApiException] carrying the HTTP code and [XRateLimit] on any non-2xx (404 = already gone,
+     * 429 = rate limited); the caller decides what each means.
+     */
+    suspend fun deleteTweet(tweetId: String): XDeleteResult = withContext(Dispatchers.IO) {
+        require(tweetId.isNotEmpty() && tweetId.all { it.isDigit() }) { "Not a post id: $tweetId" }
+        val url = "$API_BASE/tweets/$tweetId"
+        val request = Request.Builder().url(url)
+            .header("Authorization", signer.authorizationHeader("DELETE", url))
+            .delete()
+            .build()
+        okHttpClient.newCall(request).execute().use { response ->
+            val bodyText = response.body?.string().orEmpty()
+            val rateLimit = XRateLimit.from { response.header(it) }
+            if (!response.isSuccessful) {
+                throw XApiException(
+                    "${request.method} ${request.url} failed: HTTP ${response.code}: $bodyText",
+                    response.code,
+                    rateLimit,
+                )
+            }
+            val deleted = runCatching { JSONObject(bodyText).getJSONObject("data").getBoolean("deleted") }.getOrDefault(false)
+            XDeleteResult(deleted, rateLimit)
+        }
+    }
+
     private fun formBody(params: Map<String, String>) =
         params.entries.fold(okhttp3.FormBody.Builder()) { b, (k, v) -> b.add(k, v) }.build()
 
@@ -183,7 +272,13 @@ class XApiClient(
 
     private fun execute(request: Request): String = okHttpClient.newCall(request).execute().use { response ->
         val bodyText = response.body?.string().orEmpty()
-        if (!response.isSuccessful) throw XApiException("${request.method} ${request.url} failed: HTTP ${response.code}: $bodyText", response.code)
+        if (!response.isSuccessful) {
+            throw XApiException(
+                "${request.method} ${request.url} failed: HTTP ${response.code}: $bodyText",
+                response.code,
+                XRateLimit.from { response.header(it) },
+            )
+        }
         bodyText
     }
 }

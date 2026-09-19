@@ -115,6 +115,7 @@ dependencies {
     implementation(libs.squareup.okhttp)
 
     testImplementation(libs.junit)
+    testImplementation(libs.org.json) // Android's org.json is a stub on the JVM test classpath.
     testImplementation(libs.kotlinx.coroutines.test)
     androidTestImplementation(platform(libs.androidx.compose.bom))
     androidTestImplementation(libs.androidx.test.ext.junit)

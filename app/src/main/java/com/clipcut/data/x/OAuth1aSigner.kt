@@ -59,10 +59,14 @@ class OAuth1aSigner(
         )
     }
 
-    /** RFC 3986 percent-encoding, stricter than [URLEncoder] (which is form-encoding, not URI-encoding). */
-    private fun encode(value: String): String =
-        URLEncoder.encode(value, "UTF-8")
-            .replace("+", "%20")
-            .replace("*", "%2A")
-            .replace("%7E", "~")
+    private fun encode(value: String): String = percentEncode(value)
+
+    companion object {
+        /** RFC 3986 percent-encoding, stricter than [URLEncoder] (which is form-encoding, not URI-encoding). */
+        fun percentEncode(value: String): String =
+            URLEncoder.encode(value, "UTF-8")
+                .replace("+", "%20")
+                .replace("*", "%2A")
+                .replace("%7E", "~")
+    }
 }

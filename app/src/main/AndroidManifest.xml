@@ -13,19 +13,29 @@
         android:usesCleartextTraffic="true"
         android:theme="@style/Theme.ClipCut">
 
-        <!-- The app's only screen: OBS via MediaMTX LL-HLS: live view, scrub, preview, export to
-             gallery. The LLHLS online-URL path (and the caption/post-to-X pipeline that hung off
-             it) has been removed entirely; this is the app now, not a side mode. -->
+        <!-- X Auto: the launcher. One card per feature; each feature is its own Activity. -->
         <activity
-            android:name=".lan.LanBufferActivity"
+            android:name=".ui.home.HomeActivity"
             android:exported="true"
-            android:configChanges="orientation|screenSize|keyboardHidden"
             android:theme="@style/Theme.ClipCut">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!-- Clip Cut: OBS via MediaMTX HLS: live view, scrub, preview, export to gallery. -->
+        <activity
+            android:name=".lan.LanBufferActivity"
+            android:exported="false"
+            android:configChanges="orientation|screenSize|keyboardHidden"
+            android:theme="@style/Theme.ClipCut" />
+
+        <!-- Trigger Deletion: find, review, confirm, then paced deletion of BB LOGS posts. -->
+        <activity
+            android:name=".ui.deletion.DeletionActivity"
+            android:exported="false"
+            android:theme="@style/Theme.ClipCut" />
 
         <!-- Caption and post-to-X flow, launched from LanBufferActivity after a successful export.
              Separate Activity so nothing in it can affect the export and marking flow. -->
