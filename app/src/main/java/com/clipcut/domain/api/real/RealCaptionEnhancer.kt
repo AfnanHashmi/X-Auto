@@ -15,7 +15,7 @@ import java.util.concurrent.TimeUnit
 import javax.inject.Inject
 
 private const val ENDPOINT = "https://api.openai.com/v1/responses"
-private const val MODEL = "gpt-5.6-luna"
+private const val MODEL = "gpt-5.6-terra"
 // A reasoning-capable model can take well past OkHttp's default 10s read timeout.
 private const val READ_TIMEOUT_SECONDS = 60L
 
