@@ -322,6 +322,7 @@ private fun LanBufferScreen() {
                                     .fold(
                                         onSuccess = { file ->
                                             statusMessage = "Exported: ${file.name} -- check Movies/ClipCut"
+                                            CaptionPostActivity.start(context, file.absolutePath)
                                         },
                                         onFailure = { e -> statusMessage = "Export failed: ${e.message}" },
                                     )
