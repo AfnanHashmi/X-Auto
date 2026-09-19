@@ -24,6 +24,9 @@ object MediaMtxConfig {
 
     fun hlsUrl(host: String) = "http://$host:$HLS_PORT/$STREAM_PATH/index.m3u8"
 
+    /** MediaMTX playback-server listing of the recordings it holds (one entry per unbroken run). */
+    fun listUrl(host: String) = "http://$host:$PLAYBACK_PORT/list?path=$STREAM_PATH"
+
     /** MediaMTX playback-server clip URL; [startIso] is RFC 3339 UTC, [durationSec] in seconds. */
     fun clipUrl(host: String, startIso: String, durationSec: Double) =
         "http://$host:$PLAYBACK_PORT/get?path=$STREAM_PATH&start=$startIso&duration=$durationSec&format=mp4"

@@ -18,8 +18,10 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import org.json.JSONArray
 import java.io.File
 import java.time.Instant
+import java.time.OffsetDateTime
 import java.util.concurrent.TimeUnit
 
 // MediaMTX starts a clip at the keyframe before the requested time (and hides the overshoot with an
@@ -27,10 +29,17 @@ import java.util.concurrent.TimeUnit
 private const val PAD_BEFORE_MS = 2_000L
 private const val PAD_AFTER_MS = 500L
 
-// Measured against MediaMTX v1.21 by matching identical frames: the HLS playlist's
-// EXT-X-PROGRAM-DATE-TIME runs exactly 2000 ms BEHIND the recording clock the playback API uses,
-// so an epoch read off the HLS player must be shifted by this to address the same frame.
-private const val HLS_TO_RECORDING_OFFSET_MS = 2_000L
+// Measured against MediaMTX v1.21 by matching identical frames (three files, three OBS sessions):
+// the HLS playlist's EXT-X-PROGRAM-DATE-TIME (which is what the player's epoch comes from) and the
+// recording clock the playback API uses AGREE EXACTLY, except in the FIRST recording file of each
+// publish session, whose name/start time is 2000 ms too late. Every hourly roll after that is exact.
+// So an epoch read off the player only needs shifting by this when it lands in that first file --
+// shifting always (as this once did) made every clip past the first hour ~2 s late.
+private const val FIRST_FILE_LATE_MS = 2_000L
+
+// Must match `recordSegmentDuration` in relay/mediamtx.yml. Rolls happen every this long, counted
+// from the true start of the session (the first file's listed start minus FIRST_FILE_LATE_MS).
+private const val RECORD_SEGMENT_MS = 3_600_000L
 
 /**
  * Export = one HTTP GET, then an exact trim. MediaMTX cuts [startEpochMs, endEpochMs) out of its own recording and
@@ -46,9 +55,10 @@ class ClipDownloader(private val context: Context) {
         runCatching {
             val host = MediaMtxConfig.host(context)
             val spanMs = endEpochMs - startEpochMs
+            val offsetMs = recordingOffsetMs(host, startEpochMs)
             val url = MediaMtxConfig.clipUrl(
                 host,
-                Instant.ofEpochMilli(startEpochMs + HLS_TO_RECORDING_OFFSET_MS - PAD_BEFORE_MS).toString(),
+                Instant.ofEpochMilli(startEpochMs + offsetMs - PAD_BEFORE_MS).toString(),
                 (spanMs + PAD_BEFORE_MS + PAD_AFTER_MS) / 1000.0,
             )
             val raw = File(context.cacheDir, "lan_clip_raw_$startEpochMs.mp4")
@@ -68,6 +78,27 @@ class ClipDownloader(private val context: Context) {
                 raw.delete()
             }
         }
+    }
+
+    /**
+     * How far to shift a player epoch to address the same frame in the PC's recording: 2000 ms while
+     * [startEpochMs] is inside the first recording file of its session, 0 afterwards (see
+     * [FIRST_FILE_LATE_MS]). Fails loudly rather than guessing: a wrong offset silently ships a clip
+     * that starts ~2 s off, and nothing downstream re-checks it.
+     */
+    private fun recordingOffsetMs(host: String, startEpochMs: Long): Long {
+        val body = client.newCall(Request.Builder().url(MediaMtxConfig.listUrl(host)).build()).execute().use { resp ->
+            check(resp.isSuccessful) { "PC recording list returned ${resp.code}" }
+            resp.body!!.string()
+        }
+        val runs = JSONArray(body)
+        // Each entry is one unbroken run of recording; its `start` is the first file's (late) name.
+        val runStart = (0 until runs.length())
+            .map { OffsetDateTime.parse(runs.getJSONObject(it).getString("start")).toInstant().toEpochMilli() }
+            .filter { it <= startEpochMs + FIRST_FILE_LATE_MS }
+            .maxOrNull() ?: error("That moment is not in any recording on the PC")
+        val firstRollAt = runStart - FIRST_FILE_LATE_MS + RECORD_SEGMENT_MS
+        return if (startEpochMs < firstRollAt) FIRST_FILE_LATE_MS else 0L
     }
 
     /** One Transformer pass clipping [startMs, endMs) of [input] into [output], on the Main thread. */
