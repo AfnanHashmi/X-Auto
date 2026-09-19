@@ -5,30 +5,33 @@ import com.clipcut.domain.api.MainAccountApi
 import com.clipcut.domain.api.MediaAccountApi
 import com.clipcut.domain.api.MediaUploader
 import com.clipcut.domain.api.clipboard.ClipboardMainAccountApi
+import com.clipcut.domain.api.fake.FakeMediaAccountApi
+import com.clipcut.domain.api.fake.FakeMediaUploader
 import com.clipcut.domain.api.real.RealCaptionEnhancer
-import com.clipcut.domain.api.real.RealMediaAccountApi
-import com.clipcut.domain.api.real.RealMediaUploader
 import dagger.Binds
 import dagger.Module
 import dagger.hilt.InstallIn
 import dagger.hilt.components.SingletonComponent
 
 /**
- * Media account: LIVE -- the real X API uploads the clip and publishes "BB LOGS - NNN" as soon as the
- * Caption screen opens. Main account: NOT posted from the app -- [ClipboardMainAccountApi] copies the
- * caption plus the embed link to the clipboard for the user to post themselves. The AI caption
- * enhancer is real (it only rewrites text in the box).
+ * TEMPORARY DRY RUN for the media account (while working on captions): the media upload and the
+ * "latest post" lookup are FAKES, so an export publishes nothing to X. The main account only ever
+ * copies to the clipboard ([ClipboardMainAccountApi]), so nothing is posted from the app at all;
+ * the copied link will be a placeholder `example.invalid` URL until the media account is live again.
+ * The AI caption enhancer is real (it only rewrites text in the box).
  *
- * To post the main account from the app again, bind [MainAccountApi] to `RealMainAccountApi`.
+ * TO GO LIVE AGAIN: bind MediaUploader to `RealMediaUploader` and MediaAccountApi to
+ * `RealMediaAccountApi` (in `domain.api.real`), then delete any clip records whose mediaRefId starts
+ * with "fake-" so a test clip can never be reused as if it had really been uploaded.
  */
 @Module
 @InstallIn(SingletonComponent::class)
 abstract class ApiModule {
     @Binds
-    abstract fun bindMediaUploader(impl: RealMediaUploader): MediaUploader
+    abstract fun bindMediaUploader(impl: FakeMediaUploader): MediaUploader
 
     @Binds
-    abstract fun bindMediaAccountApi(impl: RealMediaAccountApi): MediaAccountApi
+    abstract fun bindMediaAccountApi(impl: FakeMediaAccountApi): MediaAccountApi
 
     @Binds
     abstract fun bindMainAccountApi(impl: ClipboardMainAccountApi): MainAccountApi
