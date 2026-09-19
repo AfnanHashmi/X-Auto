@@ -14,6 +14,10 @@ data class LanReviewUiState(
     val isPreviewing: Boolean = false,
     val isLive: Boolean = true,
     val hasContent: Boolean = false,
+    /** IN has been marked; the selection exists (its OUT follows the live edge until marked). */
+    val hasSelection: Boolean = false,
+    /** OUT has been marked, so the selection is fixed and can be previewed/exported. */
+    val outMarked: Boolean = false,
 ) {
     val selectedDurationMs: Long get() = (outPointMs - inPointMs).coerceAtLeast(0)
 }

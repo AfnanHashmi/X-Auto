@@ -57,6 +57,7 @@ fun TimelineScrubber(
     positionMs: Long,
     inPointMs: Long,
     outPointMs: Long,
+    hasSelection: Boolean,
     onSeek: (Long) -> Unit,
     onDragInPoint: (Long) -> Unit,
     onDragOutPoint: (Long) -> Unit,
@@ -115,13 +116,15 @@ fun TimelineScrubber(
                 topLeft = Offset(0f, trackY - trackHeightPx / 2f),
                 size = Size(size.width, trackHeightPx),
             )
-            val inPx = msToPx(inPointMs)
-            val outPx = msToPx(outPointMs)
-            drawRect(
-                color = Color(0xFF4FC3F7),
-                topLeft = Offset(inPx, trackY - trackHeightPx / 2f),
-                size = Size((outPx - inPx).coerceAtLeast(0f), trackHeightPx),
-            )
+            if (hasSelection) {
+                val inPx = msToPx(inPointMs)
+                val outPx = msToPx(outPointMs)
+                drawRect(
+                    color = Color(0xFF4FC3F7),
+                    topLeft = Offset(inPx, trackY - trackHeightPx / 2f),
+                    size = Size((outPx - inPx).coerceAtLeast(0f), trackHeightPx),
+                )
+            }
             val posPx = msToPx(positionMs)
             drawLine(
                 color = Color.White,
@@ -131,14 +134,14 @@ fun TimelineScrubber(
             )
         }
 
-        DragHandle(
+        if (hasSelection) DragHandle(
             xPx = msToPx(inPointMs) - handleSizePx / 2f,
             yPx = 0f,
             label = "IN",
             currentPx = { msToPxLive.value(inPointMsLive.value) },
             onDrag = { newPx -> onDragInLive.value(pxToMsLive.value(newPx)) },
         )
-        DragHandle(
+        if (hasSelection) DragHandle(
             xPx = msToPx(outPointMs) - handleSizePx / 2f,
             yPx = handleSizePx + laneGapPx,
             label = "OUT",

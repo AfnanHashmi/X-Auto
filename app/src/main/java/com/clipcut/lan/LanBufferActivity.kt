@@ -132,6 +132,7 @@ private fun LanBufferScreen() {
                 positionMs = state.positionMs,
                 inPointMs = state.inPointMs,
                 outPointMs = state.outPointMs,
+                hasSelection = state.hasSelection,
                 onSeek = controller::seekTo,
                 onDragInPoint = controller::dragInPoint,
                 onDragOutPoint = controller::dragOutPoint,
@@ -139,7 +140,13 @@ private fun LanBufferScreen() {
             )
 
             Text(
-                "Selected: ${state.selectedDurationMs / 1000}s" + if (state.isLive) "  -  LIVE" else "",
+                (
+                    when {
+                        !state.hasSelection -> "Mark IN to start a selection"
+                        !state.outMarked -> "Selected: ${state.selectedDurationMs / 1000}s (growing - mark OUT)"
+                        else -> "Selected: ${state.selectedDurationMs / 1000}s"
+                    }
+                ) + if (state.isLive) "  -  LIVE" else "",
                 color = Color.White,
                 style = MaterialTheme.typography.bodySmall,
             )
@@ -210,13 +217,13 @@ private fun LanBufferScreen() {
                             controller.setOutAtPlayhead()
                             statusMessage = "OUT marked"
                         },
-                        enabled = state.hasContent,
+                        enabled = state.hasContent && state.hasSelection,
                         modifier = Modifier.weight(1f),
                     ) { Text("Set OUT") }
                 }
                 Button(
                     onClick = { controller.enterPreview() },
-                    enabled = state.hasContent && state.selectedDurationMs > 0,
+                    enabled = state.hasContent && state.outMarked && state.selectedDurationMs > 0,
                     modifier = Modifier.fillMaxWidth(),
                 ) { Text("Preview") }
             }

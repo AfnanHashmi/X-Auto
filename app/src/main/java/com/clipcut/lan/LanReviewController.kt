@@ -17,7 +17,6 @@ import kotlinx.coroutines.launch
 
 private const val POSITION_POLL_MS = 200L
 private const val FRAME_STEP_MS = 33L // fallback (~30fps) when Format.frameRate isn't reported yet.
-private const val DEFAULT_CLIP_SPAN_MS = 15_000L
 private const val MIN_CLIP_SPAN_MS = 1_000L
 // Clock-free live model. HLS live offset from ExoPlayer depends on the phone clock matching the PC's
 // (it does not), so "how far behind live" is measured as window end minus position instead. The
@@ -35,8 +34,8 @@ private const val CATCHUP_DONE_MS = 3_500L
  * `Timeline.Window.windowStartTimeMs`, so `epoch = windowStartTimeMs + position`.
  *
  * In/out points are absolute epoch millis so a selection stays pinned to the same real moment as
- * the window slides. Until the user touches either marker, both default to "the last 15s" and keep
- * following live; the first mark/drag freezes them.
+ * the window slides. There is no default selection: it appears when IN is marked, and its OUT rides
+ * the live edge (the selection visibly grows) until OUT is marked, which fixes it.
  */
 class LanReviewController(val player: ExoPlayer) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
@@ -77,7 +76,9 @@ class LanReviewController(val player: ExoPlayer) {
         val end = start + duration
         val position = player.currentPosition.coerceIn(0, duration)
 
-        val inEpoch = inPointEpochMs ?: (end - DEFAULT_CLIP_SPAN_MS).coerceAtLeast(start)
+        val hasSelection = inPointEpochMs != null
+        val outMarked = outPointEpochMs != null
+        val inEpoch = inPointEpochMs
         val outEpoch = outPointEpochMs ?: end
         val behindMs = duration - position
 
@@ -92,7 +93,7 @@ class LanReviewController(val player: ExoPlayer) {
         if (player.playbackParameters.speed != wantSpeed) player.setPlaybackSpeed(wantSpeed)
         val isLive = followingLive && player.playWhenReady && behindMs < CATCHUP_ABOVE_MS + 1_500L
 
-        val inMs = (inEpoch - start).coerceIn(0, duration)
+        val inMs = if (inEpoch != null) (inEpoch - start).coerceIn(0, duration) else 0L
         val outMs = (outEpoch - start).coerceIn(0, duration)
         _uiState.value = LanReviewUiState(
             durationMs = duration,
@@ -105,18 +106,11 @@ class LanReviewController(val player: ExoPlayer) {
             isPreviewing = previewLoopActive,
             isLive = isLive,
             hasContent = true,
+            hasSelection = hasSelection,
+            outMarked = outMarked,
         )
 
-        if (previewLoopActive && outMs > inMs && position >= outMs) seekTo(inMs)
-    }
-
-    /** Freezes both markers at their current values so later moves of one don't shift the other. */
-    private fun materializeMarkers() {
-        val w = windowOrNull() ?: return
-        val start = windowStartEpoch(w)
-        val end = start + w.durationMs
-        if (inPointEpochMs == null) inPointEpochMs = (end - DEFAULT_CLIP_SPAN_MS).coerceAtLeast(start)
-        if (outPointEpochMs == null) outPointEpochMs = end
+        if (previewLoopActive && outMarked && outMs > inMs && position >= outMs) seekTo(inMs)
     }
 
     /** [timelineMs] is in the current window's `0..durationMs` coordinate system. */
@@ -148,26 +142,41 @@ class LanReviewController(val player: ExoPlayer) {
 
     private fun epochAt(timelineMs: Long): Long? = windowOrNull()?.let { windowStartEpoch(it) + timelineMs }
 
+    private fun windowEndEpoch(): Long? = windowOrNull()?.let { windowStartEpoch(it) + it.durationMs }
+
     fun dragInPoint(timelineMs: Long) {
-        materializeMarkers()
         val epoch = epochAt(timelineMs) ?: return
-        inPointEpochMs = epoch.coerceAtMost((outPointEpochMs ?: epoch) - MIN_CLIP_SPAN_MS)
+        val end = windowEndEpoch() ?: return
+        inPointEpochMs = epoch.coerceAtMost((outPointEpochMs ?: end) - MIN_CLIP_SPAN_MS)
         refresh()
     }
 
+    /** Dragging (or marking) OUT fixes it; while unmarked it rides the live edge. */
     fun dragOutPoint(timelineMs: Long) {
-        materializeMarkers()
+        val inEpoch = inPointEpochMs ?: return
         val epoch = epochAt(timelineMs) ?: return
-        outPointEpochMs = epoch.coerceAtLeast((inPointEpochMs ?: epoch) + MIN_CLIP_SPAN_MS)
+        outPointEpochMs = epoch.coerceAtLeast(inEpoch + MIN_CLIP_SPAN_MS)
         refresh()
     }
 
-    fun setInAtPlayhead() = dragInPoint(player.currentPosition)
+    /**
+     * Starts (or restarts) a selection at the playhead. If an OUT is already fixed at or before the
+     * new IN, that selection is over, so OUT is released back onto the live edge for a fresh one.
+     */
+    fun setInAtPlayhead() {
+        val epoch = epochAt(player.currentPosition) ?: return
+        val end = windowEndEpoch() ?: return
+        val out = outPointEpochMs
+        if (out != null && epoch > out - MIN_CLIP_SPAN_MS) outPointEpochMs = null
+        inPointEpochMs = epoch.coerceAtMost((outPointEpochMs ?: end) - MIN_CLIP_SPAN_MS)
+        refresh()
+    }
 
+    /** Fixes OUT at the playhead, at least [MIN_CLIP_SPAN_MS] after IN. No-op until IN is marked. */
     fun setOutAtPlayhead() = dragOutPoint(player.currentPosition)
 
     fun enterPreview() {
-        materializeMarkers()
+        if (inPointEpochMs == null || outPointEpochMs == null) return
         previewLoopActive = true
         seekTo(_uiState.value.inPointMs)
         player.playWhenReady = true
@@ -182,7 +191,6 @@ class LanReviewController(val player: ExoPlayer) {
 
     /** The selection as absolute epoch millis, for [ClipDownloader]; null before any window exists. */
     fun inOutEpochRange(): Pair<Long, Long>? {
-        materializeMarkers()
         val i = inPointEpochMs ?: return null
         val o = outPointEpochMs ?: return null
         return i to o
