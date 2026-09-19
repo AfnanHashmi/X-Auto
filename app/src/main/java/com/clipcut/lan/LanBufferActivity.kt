@@ -95,8 +95,11 @@ private fun LanBufferScreen() {
 
     val state by controller.uiState.collectAsState()
 
-    LaunchedEffect(state.isPreviewing) {
+    // Re-keyed on the markers: dragging IN/OUT during the preview restarts it for the new range, once the
+    // handle has stopped moving.
+    LaunchedEffect(state.isPreviewing, state.inPointMs, state.outPointMs) {
         if (state.isPreviewing) {
+            if (prepared != null) kotlinx.coroutines.delay(700)
             val range = controller.inOutEpochRange() ?: return@LaunchedEffect
             if (prepared?.first != range) {
                 prepared?.second?.cancel()
