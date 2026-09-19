@@ -3,9 +3,6 @@
 
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
-    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <application
         android:name=".ClipCutApp"
@@ -13,14 +10,16 @@
         android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
         android:supportsRtl="true"
+        android:usesCleartextTraffic="true"
         android:theme="@style/Theme.ClipCut">
 
-        <!-- The app's only screen: OBS/UDP low-latency buffer control, scrub, preview, export to
+        <!-- The app's only screen: OBS via MediaMTX LL-HLS: live view, scrub, preview, export to
              gallery. The LLHLS online-URL path (and the caption/post-to-X pipeline that hung off
              it) has been removed entirely; this is the app now, not a side mode. -->
         <activity
             android:name=".lan.LanBufferActivity"
             android:exported="true"
+            android:configChanges="orientation|screenSize|keyboardHidden"
             android:theme="@style/Theme.ClipCut">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
@@ -34,13 +33,6 @@
             android:name=".lan.CaptionPostActivity"
             android:exported="false"
             android:theme="@style/Theme.ClipCut" />
-
-        <!-- Keeps the UDP receive + rolling-chunk recording alive while the app is backgrounded,
-             behind a persistent "running in background" notification; see its own doc comment. -->
-        <service
-            android:name=".lan.LanBufferForegroundService"
-            android:exported="false"
-            android:foregroundServiceType="mediaPlayback" />
     </application>
 
 </manifest>

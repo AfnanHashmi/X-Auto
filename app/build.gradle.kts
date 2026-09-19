@@ -104,13 +104,11 @@ dependencies {
     ksp(libs.androidx.room.compiler)
 
     implementation(libs.androidx.media3.exoplayer)
+    implementation(libs.androidx.media3.exoplayer.hls)
     implementation(libs.androidx.media3.ui)
     implementation(libs.androidx.media3.ui.compose)
     implementation(libs.androidx.media3.common)
     implementation(libs.androidx.media3.datasource)
-    implementation(libs.androidx.media3.transformer)
-    implementation(libs.androidx.media3.muxer)
-    implementation(libs.androidx.media3.extractor)
 
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.squareup.okhttp)
