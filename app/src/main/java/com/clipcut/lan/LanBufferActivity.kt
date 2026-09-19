@@ -175,8 +175,7 @@ private fun LanBufferScreen() {
                             val (inEpoch, outEpoch) = controller.inOutEpochRange() ?: return@Button
                             scope.launch {
                                 isExporting = true
-                                statusMessage = "Downloading clip from PC..."
-                                ClipDownloader(context).export(inEpoch, outEpoch).fold(
+                                ClipDownloader(context).export(inEpoch, outEpoch) { statusMessage = it }.fold(
                                     onSuccess = { file ->
                                         statusMessage = "Exported: ${file.name} -- check Movies/ClipCut"
                                         CaptionPostActivity.start(context, file.absolutePath)
