@@ -3,6 +3,8 @@ package com.clipcut.domain.api.real
 import com.clipcut.data.x.XApiClient
 import com.clipcut.domain.api.MainAccountApi
 import com.clipcut.domain.api.MediaRef
+import com.clipcut.domain.api.OutcomeUnknownException
+import com.clipcut.data.x.XApiException
 import javax.inject.Inject
 import javax.inject.Named
 
@@ -18,7 +20,14 @@ class RealMainAccountApi @Inject constructor(
     @Named("main") private val mainAccountClient: XApiClient,
 ) : MainAccountApi {
     override suspend fun post(caption: String, mediaRef: MediaRef): Result<Unit> = runCatching {
-        mainAccountClient.createTweet(text = buildPostText(caption, mediaRef.url))
+        try {
+            mainAccountClient.createTweet(text = buildPostText(caption, mediaRef.url))
+        } catch (e: XApiException) {
+            if ((e.httpCode ?: 0) >= 500) throw OutcomeUnknownException("Main post may have gone out: ${e.message}", e)
+            throw e
+        } catch (e: java.io.IOException) {
+            throw OutcomeUnknownException("Main post may have gone out (no response): ${e.message}", e)
+        }
         Unit
     }
 

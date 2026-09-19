@@ -9,6 +9,8 @@ import com.clipcut.data.db.CaptionTemplateDao
 import com.clipcut.data.db.ClipRecordDao
 import com.clipcut.data.db.UndoEntry
 import com.clipcut.data.db.UndoEntryDao
+import com.clipcut.data.db.getOrCreate
+import com.clipcut.domain.api.OutcomeUnknownException
 import com.clipcut.domain.api.CaptionEnhancer
 import com.clipcut.domain.api.MediaAccountApi
 import com.clipcut.domain.api.MediaRef
@@ -55,33 +57,83 @@ class CaptionViewModel @Inject constructor(
         loadLatestPost()
     }
 
+    // In-memory guard against a double tap on the retry button while a request is in flight.
+    private var uploadInFlight = false
+
     private fun uploadClip() {
         viewModelScope.launch {
             // Uploading publishes a real post on the media account, so it must happen at most once
-            // per clip -- this ViewModel is recreated on process-death restore, which would
-            // otherwise re-publish the same clip.
-            val existing = clipRecordDao.findByPath(clipPath)
-            if (existing?.mediaRefId != null) {
+            // per clip -- and this ViewModel is recreated whenever Android kills the app in the
+            // background and the user comes back. The record is what survives that.
+            val record = clipRecordDao.getOrCreate(clipPath)
+            if (record.mediaRefId != null) {
                 _uiState.update {
                     it.copy(
                         isUploading = false,
-                        mediaRef = MediaRef(id = existing.mediaRefId, url = existing.mediaRefUrl.orEmpty()),
+                        mediaRef = MediaRef(id = record.mediaRefId, url = record.mediaRefUrl.orEmpty()),
                     )
                 }
                 return@launch
             }
-            _uiState.update { it.copy(isUploading = true) }
+            if (record.uploadAttempted) {
+                // Died (or lost the reply) mid-request: the media post may already be on X.
+                _uiState.update {
+                    it.copy(
+                        isUploading = false,
+                        uploadOutcomeUnknown = true,
+                        statusMessage = "The app closed while uploading, so this clip may already be posted on " +
+                            "the media account. Check it on X before uploading again.",
+                    )
+                }
+                return@launch
+            }
+            startUpload()
+        }
+    }
+
+    /** User-initiated: plain retry after a rejected upload, or "upload anyway" after an unknown outcome. */
+    fun retryUpload() {
+        viewModelScope.launch { startUpload() }
+    }
+
+    private suspend fun startUpload() {
+        if (uploadInFlight) return
+        uploadInFlight = true
+        try {
+            val record = clipRecordDao.getOrCreate(clipPath)
+            if (record.mediaRefId != null) return
+            // Persist the marker BEFORE the request, so a kill at any later point is detectable.
+            clipRecordDao.update(record.copy(uploadAttempted = true))
+            _uiState.update { it.copy(isUploading = true, uploadOutcomeUnknown = false, statusMessage = null) }
+
             mediaUploader.upload(File(clipPath)).fold(
                 onSuccess = { ref ->
-                    _uiState.update { it.copy(isUploading = false, mediaRef = ref) }
-                    clipRecordDao.findByPath(clipPath)?.let { record ->
-                        clipRecordDao.update(record.copy(mediaRefId = ref.id, mediaRefUrl = ref.url))
+                    // Save the reference before showing it, so "Uploaded" always means "recorded".
+                    clipRecordDao.getOrCreate(clipPath).let {
+                        clipRecordDao.update(it.copy(mediaRefId = ref.id, mediaRefUrl = ref.url, uploadAttempted = false))
                     }
+                    _uiState.update { it.copy(isUploading = false, mediaRef = ref) }
                 },
                 onFailure = { e ->
-                    _uiState.update { it.copy(isUploading = false, statusMessage = "Upload failed: ${e.message}") }
+                    if (e is OutcomeUnknownException) {
+                        // Leave uploadAttempted set: a blind retry could publish a duplicate.
+                        _uiState.update {
+                            it.copy(
+                                isUploading = false,
+                                uploadOutcomeUnknown = true,
+                                statusMessage = "No reply from X, so the media post may have gone out. " +
+                                    "Check the media account before uploading again.",
+                            )
+                        }
+                    } else {
+                        // A definitive rejection: nothing was posted, so a retry is safe.
+                        clipRecordDao.getOrCreate(clipPath).let { clipRecordDao.update(it.copy(uploadAttempted = false)) }
+                        _uiState.update { it.copy(isUploading = false, statusMessage = "Upload failed: ${e.message}") }
+                    }
                 },
             )
+        } finally {
+            uploadInFlight = false
         }
     }
 

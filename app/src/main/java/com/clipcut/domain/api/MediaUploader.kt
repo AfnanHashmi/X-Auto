@@ -17,3 +17,10 @@ data class MediaRef(val id: String, val url: String)
 interface MediaUploader {
     suspend fun upload(clipFile: File): Result<MediaRef>
 }
+
+/**
+ * A publish request whose outcome is UNKNOWN: it was sent, but no definitive answer came back
+ * (timeout, dropped connection, HTTP 5xx), so the post may or may not exist on X. Callers must NOT
+ * retry this automatically -- doing so is how one clip becomes two identical public posts.
+ */
+class OutcomeUnknownException(message: String, cause: Throwable? = null) : java.io.IOException(message, cause)

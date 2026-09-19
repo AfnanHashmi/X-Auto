@@ -58,6 +58,11 @@ fun CaptionScreen(
                 } else if (state.mediaRef != null) {
                     Text("Uploaded: ${state.mediaRef?.url}", style = MaterialTheme.typography.bodySmall)
                 }
+                if (!state.isUploading && state.mediaRef == null) {
+                    OutlinedButton(onClick = viewModel::retryUpload) {
+                        Text(if (state.uploadOutcomeUnknown) "Upload anyway (may duplicate)" else "Retry upload")
+                    }
+                }
                 state.embeddedPost?.let { post ->
                     Text(
                         text = "Embedding latest media-account post: ${post.mediaRef.url}",

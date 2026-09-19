@@ -14,6 +14,8 @@ data class CaptionUiState(
     val isEnhancing: Boolean = false,
     val canUndo: Boolean = false,
     val statusMessage: String? = null,
+    /** The media post may already exist on X; uploading again needs an explicit, informed tap. */
+    val uploadOutcomeUnknown: Boolean = false,
 ) {
     /** Ready to post once the clip has uploaded (so there's a [MediaRef] to attach) and there's text. */
     val canProceedToPost: Boolean get() = mediaRef != null && caption.isNotBlank()

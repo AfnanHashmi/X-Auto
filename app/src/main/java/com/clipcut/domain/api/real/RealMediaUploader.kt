@@ -4,6 +4,8 @@ import com.clipcut.data.x.BbLogsCounter
 import com.clipcut.data.x.XApiClient
 import com.clipcut.domain.api.MediaRef
 import com.clipcut.domain.api.MediaUploader
+import com.clipcut.domain.api.OutcomeUnknownException
+import com.clipcut.data.x.XApiException
 import java.io.File
 import javax.inject.Inject
 import javax.inject.Named
@@ -21,7 +23,15 @@ class RealMediaUploader @Inject constructor(
     override suspend fun upload(clipFile: File): Result<MediaRef> = runCatching {
         val handle = mediaAccountClient.getMe().username
         val mediaId = mediaAccountClient.uploadVideo(clipFile)
-        val tweet = mediaAccountClient.createTweet(text = bbLogsCounter.nextCaption(), mediaIds = listOf(mediaId))
+        val tweet = try {
+            mediaAccountClient.createTweet(text = bbLogsCounter.nextCaption(), mediaIds = listOf(mediaId))
+        } catch (e: XApiException) {
+            // A 4xx is a definitive rejection (nothing was posted); a 5xx may have posted anyway.
+            if ((e.httpCode ?: 0) >= 500) throw OutcomeUnknownException("Media post may have gone out: ${e.message}", e)
+            throw e
+        } catch (e: java.io.IOException) {
+            throw OutcomeUnknownException("Media post may have gone out (no response): ${e.message}", e)
+        }
         bbLogsCounter.commit() // only advance the counter once the post actually succeeded.
         // The /video/1 suffix is what makes X unfurl this into an embedded, playable video card;
         // the bare /<handle>/status/<id> permalink instead unfurled as a plain quote-style link

@@ -17,6 +17,18 @@ class BbLogsCounter @Inject constructor(
 ) {
     private val prefs = context.getSharedPreferences("bb_logs_counter", Context.MODE_PRIVATE)
 
+    init {
+        // 001 and 002 were posted by hand, so numbering continues at 003. The phone already held a
+        // stale counter from earlier testing (value 4), so a changed default alone would not apply;
+        // seed it exactly once, then never touch it again.
+        if (!prefs.getBoolean(KEY_SEEDED, false)) {
+            prefs.edit {
+                putInt(KEY_COUNTER, FIRST_COUNTER)
+                putBoolean(KEY_SEEDED, true)
+            }
+        }
+    }
+
     /** Reserves and returns the next caption; call [commit] only after the post using it succeeds. */
     @Synchronized
     fun nextCaption(): String = "BB LOGS - %03d".format(prefs.getInt(KEY_COUNTER, 0))
@@ -30,5 +42,7 @@ class BbLogsCounter @Inject constructor(
 
     private companion object {
         const val KEY_COUNTER = "counter"
+        const val KEY_SEEDED = "seeded_v1"
+        const val FIRST_COUNTER = 3
     }
 }

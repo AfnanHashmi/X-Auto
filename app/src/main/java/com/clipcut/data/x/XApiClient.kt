@@ -16,7 +16,8 @@ import java.io.IOException
 data class TweetResult(val id: String, val text: String)
 data class XUser(val id: String, val username: String)
 
-class XApiException(message: String) : IOException(message)
+/** [httpCode] is set when X answered with a non-2xx status (a definitive reply, unless 5xx). */
+class XApiException(message: String, val httpCode: Int? = null) : IOException(message)
 
 private const val UPLOAD_BASE = "https://upload.twitter.com/1.1/media/upload.json"
 private const val API_BASE = "https://api.twitter.com/2"
@@ -182,7 +183,7 @@ class XApiClient(
 
     private fun execute(request: Request): String = okHttpClient.newCall(request).execute().use { response ->
         val bodyText = response.body?.string().orEmpty()
-        if (!response.isSuccessful) throw XApiException("${request.method} ${request.url} failed: HTTP ${response.code}: $bodyText")
+        if (!response.isSuccessful) throw XApiException("${request.method} ${request.url} failed: HTTP ${response.code}: $bodyText", response.code)
         bodyText
     }
 }

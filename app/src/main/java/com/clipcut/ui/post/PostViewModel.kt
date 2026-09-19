@@ -5,6 +5,8 @@ import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.clipcut.data.db.ClipRecordDao
+import com.clipcut.data.db.getOrCreate
+import com.clipcut.domain.api.OutcomeUnknownException
 import com.clipcut.domain.api.MainAccountApi
 import com.clipcut.domain.api.MediaRef
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -40,12 +42,12 @@ class PostViewModel @Inject constructor(
         // is exactly the pattern that gets an account flagged.
         if (_uiState.value.isPosting || _uiState.value.isPosted) return
         viewModelScope.launch {
-            val record = clipRecordDao.findByPath(clipPath)
-            if (record?.posted == true) {
+            val record = clipRecordDao.getOrCreate(clipPath)
+            if (record.posted) {
                 _uiState.update { it.copy(isPosting = false, isPosted = true) }
                 return@launch
             }
-            if (record?.postAttempted == true) {
+            if (record.postAttempted) {
                 // The app died between marking postAttempted and clearing it below -- meaning we
                 // never got a response, so we genuinely don't know if the post went out. Retrying
                 // blind risks a duplicate; surface it instead of guessing.
@@ -60,7 +62,7 @@ class PostViewModel @Inject constructor(
             }
 
             _uiState.update { it.copy(isPosting = true, errorMessage = null) }
-            record?.let { clipRecordDao.update(it.copy(postAttempted = true)) }
+            clipRecordDao.update(record.copy(postAttempted = true))
 
             mainAccountApi.post(_uiState.value.caption, mediaRef).fold(
                 onSuccess = {
@@ -75,9 +77,20 @@ class PostViewModel @Inject constructor(
                     runCatching { File(clipPath).delete() }
                 },
                 onFailure = { e ->
-                    _uiState.update { it.copy(isPosting = false, errorMessage = e.message ?: "Unknown error") }
-                    clipRecordDao.findByPath(clipPath)?.let {
-                        clipRecordDao.update(it.copy(postAttempted = false))
+                    if (e is OutcomeUnknownException) {
+                        // No definitive reply: leave postAttempted set so Retry cannot double-post.
+                        _uiState.update {
+                            it.copy(
+                                isPosting = false,
+                                errorMessage = "No reply from X, so this may have posted. " +
+                                    "Check your main account on X before retrying.",
+                            )
+                        }
+                    } else {
+                        _uiState.update { it.copy(isPosting = false, errorMessage = e.message ?: "Unknown error") }
+                        clipRecordDao.findByPath(clipPath)?.let {
+                            clipRecordDao.update(it.copy(postAttempted = false))
+                        }
                     }
                 },
             )
