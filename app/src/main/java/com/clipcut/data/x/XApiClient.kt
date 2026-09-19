@@ -261,6 +261,24 @@ class XApiClient(
         }
     }
 
+    /**
+     * Whether a post is still on X. Read-only, and the answer to "did that timed-out DELETE land?".
+     * v2 reports a missing post as HTTP 200 with an `errors` array and no `data`, not as a 404.
+     */
+    suspend fun tweetExists(tweetId: String): Boolean = withContext(Dispatchers.IO) {
+        require(tweetId.isNotEmpty() && tweetId.all { it.isDigit() }) { "Not a post id: $tweetId" }
+        val url = "$API_BASE/tweets/$tweetId"
+        val request = Request.Builder().url(url)
+            .header("Authorization", signer.authorizationHeader("GET", url))
+            .get()
+            .build()
+        try {
+            JSONObject(execute(request)).has("data")
+        } catch (e: XApiException) {
+            if (e.httpCode == 404) false else throw e
+        }
+    }
+
     private fun formBody(params: Map<String, String>) =
         params.entries.fold(okhttp3.FormBody.Builder()) { b, (k, v) -> b.add(k, v) }.build()
 

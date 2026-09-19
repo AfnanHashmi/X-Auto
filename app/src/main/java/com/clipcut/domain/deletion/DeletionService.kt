@@ -160,10 +160,14 @@ class DeletionService @Inject constructor(
         var deleted = 0
         var gone = 0
         var stop: RunStop = RunStop.Completed
+        var lastCallMs = 0L
         for ((index, c) in batch.withIndex()) {
             if (index > 0) {
+                // The point of pacing is the gap between requests, and a slow link already provides it:
+                // only wait for whatever the last call did not already cover.
+                val wait = PACE_MS + Random.nextLong(-JITTER_MS, JITTER_MS + 1) - lastCallMs
                 try {
-                    delay(PACE_MS + Random.nextLong(-JITTER_MS, JITTER_MS + 1))
+                    if (wait > 0) delay(wait)
                 } catch (e: kotlinx.coroutines.CancellationException) {
                     stop = RunStop.UserStopped
                     break
@@ -175,7 +179,10 @@ class DeletionService @Inject constructor(
             }
             // The request and its log write are one uninterruptible unit: a cancel that landed mid-request
             // would discard a real deletion's result and leave X and the log disagreeing.
-            when (val step = withContext(NonCancellable) { deleteOne(runId, c, now) }) {
+            val startedAt = System.currentTimeMillis()
+            val step = withContext(NonCancellable) { deleteOne(runId, c, now) }
+            lastCallMs = System.currentTimeMillis() - startedAt
+            when (step) {
                 is Step.Settled -> {
                     if (step.outcome == CandidateOutcome.DELETED) deleted++ else gone++
                     onOutcome(c.id, step.outcome)
@@ -238,17 +245,41 @@ class DeletionService @Inject constructor(
                 }
             }
         } catch (e: IOException) {
-            // No HTTP reply at all: the delete may or may not have happened. Leave it IN_FLIGHT.
-            Step.Halt(RunStop.UnknownOutcome(c.id, e.message ?: "no reply from X"))
+            // No HTTP reply, usually a timeout on a slow link -- but X may well have carried the delete
+            // out anyway (it did, the first time this happened). Ask, rather than leaving it unknown.
+            settleByAsking(c, ::row, e)
         }
     }
 
+    /** Resolves a timed-out delete with one read. Only if that read fails too is the outcome unknown. */
+    private suspend fun settleByAsking(c: DeletionCandidate, row: (String) -> DeletedPost, cause: IOException): Step =
+        try {
+            if (client.tweetExists(c.id)) {
+                log.discardInFlight(c.id)
+                Step.Halt(RunStop.HardError("No reply for post ${c.id} and it is still up (${cause.message}). Nothing was deleted."))
+            } else {
+                log.upsert(row(DeletedPost.DELETED))
+                Step.Settled(CandidateOutcome.DELETED)
+            }
+        } catch (e: IOException) {
+            Step.Halt(RunStop.UnknownOutcome(c.id, cause.message ?: "no reply from X"))
+        }
+
     private val runLock = kotlinx.coroutines.sync.Mutex()
 
-    private suspend fun verifiedAccount() = client.getMe().also {
+    @Volatile
+    private var verified: com.clipcut.data.x.XUser? = null
+
+    /**
+     * Proves the credentials belong to [EXPECTED_HANDLE] before anything is touched. Cached for the life
+     * of the process: the keys are compiled in and cannot change under us, and on a slow link this call
+     * costs as much as a deletion does.
+     */
+    private suspend fun verifiedAccount(): com.clipcut.data.x.XUser = verified ?: client.getMe().also {
         check(it.username.equals(EXPECTED_HANDLE, ignoreCase = true)) {
             "The media API keys belong to @${it.username}, not @$EXPECTED_HANDLE. Refusing to delete anything."
         }
+        verified = it
     }
 
     companion object {
