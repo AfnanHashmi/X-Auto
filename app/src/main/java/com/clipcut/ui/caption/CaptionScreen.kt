@@ -139,6 +139,7 @@ fun CaptionScreen(
         }
 
         MoodPicker(selected = state.mood, onSelect = viewModel::selectMood, enabled = !state.isEnhancing)
+        HashtagPicker(caption = state.caption, onAdd = viewModel::addHashtag, enabled = !state.isEnhancing)
 
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Button(onClick = viewModel::enhance, enabled = state.canEnhance) {
@@ -209,6 +210,53 @@ fun CaptionScreen(
         }
     }
 }
+
+/** Dropdown of fixed hashtags; tapping one writes it at the end of the caption. The sheet stays open for several. */
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
+@Composable
+private fun HashtagPicker(caption: String, onAdd: (String) -> Unit, enabled: Boolean) {
+    var open by remember { mutableStateOf(false) }
+    OutlinedButton(onClick = { open = true }, enabled = enabled, modifier = Modifier.fillMaxWidth()) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text("#  Hashtags")
+            Text("▾")
+        }
+    }
+    if (open) {
+        ModalBottomSheet(
+            onDismissRequest = { open = false },
+            sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+        ) {
+            Column(
+                modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, bottom = 32.dp),
+                verticalArrangement = Arrangement.spacedBy(14.dp),
+            ) {
+                Text("Tap to add", style = MaterialTheme.typography.titleMedium)
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    HASHTAGS.forEach { tag ->
+                        FilterChip(
+                            selected = caption.contains(tag, ignoreCase = true),
+                            onClick = { onAdd(tag) },
+                            label = { Text(tag) },
+                        )
+                    }
+                }
+                TextButton(onClick = { open = false }, modifier = Modifier.align(Alignment.End)) { Text("Done") }
+            }
+        }
+    }
+}
+
+private val HASHTAGS = listOf(
+    "#BiggBoss20", "#QaziTouqeer", "#ArishfaKhan", "#UditiSingh", "#YungDSA", "#KanikaMann", "#Gullu",
+)
 
 private val MOOD_GROUPS = listOf(
     "🔥  Energy" to listOf(CaptionMood.FIGHT, CaptionMood.BASHING, CaptionMood.SAVAGE, CaptionMood.VICTORY, CaptionMood.SHOCK),

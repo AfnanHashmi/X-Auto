@@ -204,6 +204,17 @@ class CaptionViewModel @Inject constructor(
         updateCaption(CaptionFormatText.compose(p.format, p.heading, body))
     }
 
+    /** Writes a hashtag at the end of the caption (of the Caption field in templated posts); a tag already there is not repeated. */
+    fun addHashtag(tag: String) {
+        commitManualEdit()
+        val before = _uiState.value.caption
+        val p = CaptionFormatText.parse(before)
+        if (p.body.contains(tag, ignoreCase = true)) return
+        val body = if (p.body.isBlank()) tag else p.body.trimEnd() + " " + tag
+        pushUndo(before)
+        _uiState.update { it.copy(caption = CaptionFormatText.compose(p.format, p.heading, body)) }
+    }
+
     /** Plain posts enhance as one caption; templated ones enhance only heading + caption, never the label. */
     private suspend fun runEnhance(before: String): Result<String> {
         val mood = _uiState.value.mood
