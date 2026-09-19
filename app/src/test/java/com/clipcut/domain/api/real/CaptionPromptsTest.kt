@@ -27,7 +27,7 @@ class CaptionPromptsTest {
     fun everyPromptHasTheMasterPromptAndItsOwnMoodBlock() {
         for (mood in CaptionMood.entries.filter { it != CaptionMood.AUTO }) {
             val p = buildPrompt(mood)
-            assertTrue("master prompt missing for ${mood.label}", p.startsWith("You are an expert X (Twitter) caption editor"))
+            assertTrue("master prompt missing for ${mood.label}", p.startsWith("You are an expert X (Twitter) caption writer and editor"))
             assertTrue(p.contains("Mood: ${mood.label}\n"))
             assertTrue(p.contains("Intensity:\n${mood.intensity}/10"))
             assertTrue(p.contains("Emoji level:\n${mood.emojiLevel}/3"))
@@ -53,7 +53,7 @@ class CaptionPromptsTest {
     @Test
     fun autoAsksTheModelToPickFromAllFifteenAndNotToSayWhich() {
         val p = buildPrompt(CaptionMood.AUTO)
-        assertTrue(p.startsWith("You are an expert X (Twitter) caption editor"))
+        assertTrue(p.startsWith("You are an expert X (Twitter) caption writer and editor"))
         assertTrue(p.contains("Mood: Auto"))
         for (mood in CaptionMood.entries.filter { it != CaptionMood.AUTO }) {
             assertTrue("Auto prompt should list ${mood.label}", p.contains("\n${mood.label}\n"))
