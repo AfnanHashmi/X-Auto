@@ -39,7 +39,7 @@ private const val FIRST_FILE_LATE_MS = 2_000L
 
 // Must match `recordSegmentDuration` in relay/mediamtx.yml. Rolls happen every this long, counted
 // from the true start of the session (the first file's listed start minus FIRST_FILE_LATE_MS).
-private const val RECORD_SEGMENT_MS = 3_600_000L
+private const val RECORD_SEGMENT_MS = 600_000L
 
 /**
  * Export = one HTTP GET, then an exact trim. MediaMTX cuts [startEpochMs, endEpochMs) out of its own recording and
