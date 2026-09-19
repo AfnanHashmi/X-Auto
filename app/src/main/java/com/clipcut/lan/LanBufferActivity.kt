@@ -20,6 +20,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -37,6 +38,7 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.media3.ui.PlayerView
 import com.clipcut.data.stream.lan.MediaMtxConfig
 import com.clipcut.ui.cut.TimelineScrubber
+import kotlinx.coroutines.async
 import kotlinx.coroutines.launch
 
 /**
@@ -65,6 +67,9 @@ private fun LanBufferScreen() {
     var hostDraft by remember { mutableStateOf(host) }
     var isExporting by remember { mutableStateOf(false) }
     var statusMessage by remember { mutableStateOf<String?>(null) }
+    // The slow part of an export (PC cut + download + trim) starts as soon as the preview opens, so by the
+    // time Export is tapped it is usually done. Keyed by the marked range; dropped if the preview is left.
+    var prepared by remember { mutableStateOf<Pair<Pair<Long, Long>, kotlinx.coroutines.Deferred<Result<java.io.File>>>?>(null) }
 
     val player = remember(host) { LanBufferSession.start(context, host) }
     val controller = remember(player) { LanReviewController(player) }
@@ -89,6 +94,19 @@ private fun LanBufferScreen() {
     }
 
     val state by controller.uiState.collectAsState()
+
+    LaunchedEffect(state.isPreviewing) {
+        if (state.isPreviewing) {
+            val range = controller.inOutEpochRange() ?: return@LaunchedEffect
+            if (prepared?.first != range) {
+                prepared?.second?.cancel()
+                prepared = range to scope.async { ClipDownloader(context).prepare(range.first, range.second) { } }
+            }
+        } else {
+            prepared?.second?.cancel()
+            prepared = null
+        }
+    }
 
     Column(modifier = Modifier.fillMaxSize().background(Color.Black)) {
         Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
@@ -179,15 +197,24 @@ private fun LanBufferScreen() {
                     OutlinedButton(onClick = { controller.exitPreview() }) { Text("Cancel") }
                     Button(
                         onClick = {
-                            val (inEpoch, outEpoch) = controller.inOutEpochRange() ?: return@Button
+                            val range = controller.inOutEpochRange() ?: return@Button
                             scope.launch {
                                 isExporting = true
-                                ClipDownloader(context).export(inEpoch, outEpoch) { statusMessage = it }.fold(
+                                statusMessage = "Preparing clip..."
+                                val job = prepared?.takeIf { it.first == range }?.second
+                                    ?: scope.async { ClipDownloader(context).prepare(range.first, range.second) { statusMessage = it } }
+                                        .also { prepared = range to it }
+                                val downloader = ClipDownloader(context)
+                                job.await().mapCatching { downloader.saveToGallery(it).getOrThrow() }.fold(
                                     onSuccess = { file ->
+                                        prepared = null
                                         statusMessage = "Exported: ${file.name} -- check Movies/ClipCut"
                                         CaptionPostActivity.start(context, file.absolutePath)
                                     },
-                                    onFailure = { e -> statusMessage = "Export failed: ${e.message}" },
+                                    onFailure = { e ->
+                                        prepared = null
+                                        statusMessage = "Export failed: ${e.message}"
+                                    },
                                 )
                                 isExporting = false
                             }

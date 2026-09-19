@@ -42,7 +42,7 @@ private const val FIRST_FILE_LATE_MS = 2_000L
 private const val RECORD_SEGMENT_MS = 600_000L
 
 /**
- * Export = one HTTP GET, then an exact trim. MediaMTX cuts [startEpochMs, endEpochMs) out of its own recording and
+ * Export = one HTTP GET, then an exact trim ([prepare], started as soon as the preview opens), then the gallery save. MediaMTX cuts [startEpochMs, endEpochMs) out of its own recording and
  * returns a finished, muxed MP4; the phone just saves it and copies it to the gallery.
  */
 class ClipDownloader(private val context: Context) {
@@ -51,7 +51,11 @@ class ClipDownloader(private val context: Context) {
         .readTimeout(120, TimeUnit.SECONDS)
         .build()
 
-    suspend fun export(startEpochMs: Long, endEpochMs: Long, onProgress: (String) -> Unit): Result<File> = withContext(Dispatchers.IO) {
+    /**
+     * Everything slow, ahead of the Export tap: the PC cuts the clip, the phone downloads it and trims it
+     * exactly. Returns the trimmed file in the cache; nothing is saved to the gallery yet.
+     */
+    suspend fun prepare(startEpochMs: Long, endEpochMs: Long, onProgress: (String) -> Unit): Result<File> = withContext(Dispatchers.IO) {
         runCatching {
             val host = MediaMtxConfig.host(context)
             val spanMs = endEpochMs - startEpochMs
@@ -71,12 +75,21 @@ class ClipDownloader(private val context: Context) {
                 }
                 check(raw.length() > 0) { "PC returned an empty clip" }
                 trim(raw, PAD_BEFORE_MS, PAD_BEFORE_MS + spanMs, out) { onProgress("Trimming: $it%") }
-                onProgress("Saving to gallery...")
-                GalleryStore.copyToGallery(context, out)
                 out
+            } catch (e: Throwable) {
+                out.delete()
+                throw e
             } finally {
                 raw.delete()
             }
+        }
+    }
+
+    /** Copies a [prepare]d clip to Movies/ClipCut. */
+    suspend fun saveToGallery(prepared: File): Result<File> = withContext(Dispatchers.IO) {
+        runCatching {
+            GalleryStore.copyToGallery(context, prepared)
+            prepared
         }
     }
 
