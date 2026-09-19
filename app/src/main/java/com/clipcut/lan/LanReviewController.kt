@@ -19,7 +19,15 @@ private const val POSITION_POLL_MS = 200L
 private const val FRAME_STEP_MS = 33L // fallback (~30fps) when Format.frameRate isn't reported yet.
 private const val DEFAULT_CLIP_SPAN_MS = 15_000L
 private const val MIN_CLIP_SPAN_MS = 1_000L
-private const val LIVE_OFFSET_THRESHOLD_MS = 4_000L
+// Clock-free live model. HLS live offset from ExoPlayer depends on the phone clock matching the PC's
+// (it does not), so "how far behind live" is measured as window end minus position instead. The
+// player sits LIVE_CUSHION_MS behind the edge so a WiFi hiccup (measured: occasional ~4s TCP stalls
+// on held LL-HLS requests, both devices on WiFi) drains the cushion instead of freezing playback;
+// if a stall pushes it past CATCHUP_ABOVE_MS it plays slightly fast until back at the cushion.
+private const val LIVE_CUSHION_MS = 3_000L
+private const val CATCHUP_ABOVE_MS = 4_500L
+private const val CATCHUP_SPEED = 1.15f
+private const val CATCHUP_DONE_MS = 3_500L
 
 /**
  * Drives the one HLS player as a scrubbable timeline. The window is MediaMTX's sliding DVR window;
@@ -37,6 +45,8 @@ class LanReviewController(val player: ExoPlayer) {
     private var inPointEpochMs: Long? = null
     private var outPointEpochMs: Long? = null
     private var previewLoopActive = false
+    private var followingLive = true
+    private var didInitialSeek = false
 
     private val _uiState = MutableStateFlow(LanReviewUiState())
     val uiState: StateFlow<LanReviewUiState> = _uiState.asStateFlow()
@@ -69,8 +79,18 @@ class LanReviewController(val player: ExoPlayer) {
 
         val inEpoch = inPointEpochMs ?: (end - DEFAULT_CLIP_SPAN_MS).coerceAtLeast(start)
         val outEpoch = outPointEpochMs ?: end
-        val offset = player.currentLiveOffset
-        val isLive = player.playWhenReady && offset != C.TIME_UNSET && offset < LIVE_OFFSET_THRESHOLD_MS
+        val behindMs = duration - position
+
+        if (!didInitialSeek) {
+            didInitialSeek = true
+            player.seekTo((duration - LIVE_CUSHION_MS).coerceAtLeast(0))
+        }
+        val wantSpeed =
+            if (followingLive && player.playWhenReady && !previewLoopActive &&
+                (behindMs > CATCHUP_ABOVE_MS || (player.playbackParameters.speed > 1f && behindMs > CATCHUP_DONE_MS))
+            ) CATCHUP_SPEED else 1f
+        if (player.playbackParameters.speed != wantSpeed) player.setPlaybackSpeed(wantSpeed)
+        val isLive = followingLive && player.playWhenReady && behindMs < CATCHUP_ABOVE_MS + 1_500L
 
         val inMs = (inEpoch - start).coerceIn(0, duration)
         val outMs = (outEpoch - start).coerceIn(0, duration)
@@ -79,7 +99,9 @@ class LanReviewController(val player: ExoPlayer) {
             positionMs = position,
             inPointMs = inMs,
             outPointMs = outMs,
-            isPlaying = player.isPlaying,
+            // Intent, not Player.isPlaying: isPlaying is false during every rebuffer, which flipped the
+            // button to "Play" while playback was still wanted, so a tap paused instead of playing.
+            isPlaying = player.playWhenReady,
             isPreviewing = previewLoopActive,
             isLive = isLive,
             hasContent = true,
@@ -100,16 +122,20 @@ class LanReviewController(val player: ExoPlayer) {
     /** [timelineMs] is in the current window's `0..durationMs` coordinate system. */
     fun seekTo(timelineMs: Long) {
         val d = windowOrNull()?.durationMs ?: return
+        followingLive = false
         player.seekTo(timelineMs.coerceIn(0, d))
     }
 
     fun togglePlayPause() {
+        if (player.playWhenReady) followingLive = false
         player.playWhenReady = !player.playWhenReady
     }
 
     fun jumpToLive() {
         previewLoopActive = false
-        player.seekToDefaultPosition()
+        val d = windowOrNull()?.durationMs
+        if (d != null) player.seekTo((d - LIVE_CUSHION_MS).coerceAtLeast(0)) else player.seekToDefaultPosition()
+        followingLive = true
         player.playWhenReady = true
     }
 
