@@ -15,6 +15,8 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
+import kotlin.coroutines.coroutineContext
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -65,22 +67,36 @@ class ClipDownloader(private val context: Context) {
                 Instant.ofEpochMilli(startEpochMs + offsetMs - PAD_BEFORE_MS).toString(),
                 (spanMs + PAD_BEFORE_MS + PAD_AFTER_MS) / 1000.0,
             )
-            val raw = File(context.cacheDir, "lan_clip_raw_$startEpochMs.mp4")
+            // Every prepare works in its own temp files and only renames the finished clip into place:
+            // a cancelled or superseded prepare of the same range must never touch another one's bytes.
+            val tag = System.nanoTime()
+            val raw = File(context.cacheDir, "lan_clip_raw_${startEpochMs}_$tag.part")
+            val work = File(context.cacheDir, "lan_clip_${startEpochMs}_$tag.part")
             val out = File(context.cacheDir, "lan_clip_$startEpochMs.mp4")
             try {
                 onProgress("Downloading clip from PC...")
                 client.newCall(Request.Builder().url(url).build()).execute().use { resp ->
                     check(resp.isSuccessful) { "PC returned ${resp.code}: ${resp.body?.string()?.take(120)}" }
-                    resp.body!!.byteStream().use { input -> raw.outputStream().use { input.copyTo(it) } }
+                    resp.body!!.byteStream().use { input ->
+                        raw.outputStream().use { o ->
+                            val buf = ByteArray(64 * 1024)
+                            while (true) {
+                                coroutineContext.ensureActive()
+                                val n = input.read(buf)
+                                if (n < 0) break
+                                o.write(buf, 0, n)
+                            }
+                        }
+                    }
                 }
                 check(raw.length() > 0) { "PC returned an empty clip" }
-                trim(raw, PAD_BEFORE_MS, PAD_BEFORE_MS + spanMs, out) { onProgress("Trimming: $it%") }
+                trim(raw, PAD_BEFORE_MS, PAD_BEFORE_MS + spanMs, work) { onProgress("Trimming: $it%") }
+                coroutineContext.ensureActive()
+                check(work.renameTo(out) || (out.delete() && work.renameTo(out))) { "Could not finish the clip file" }
                 out
-            } catch (e: Throwable) {
-                out.delete()
-                throw e
             } finally {
                 raw.delete()
+                work.delete() // no-op once renamed
             }
         }
     }
