@@ -1,5 +1,6 @@
 package com.clipcut.ui.deletion
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -36,6 +37,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -62,6 +64,9 @@ fun DeletionScreen(
     onExit: () -> Unit = {},
 ) {
     val state by viewModel.uiState.collectAsState()
+
+    // Back during a run means "stop", not "leave": leaving would kill the Activity mid-run.
+    BackHandler(enabled = state.phase == DeletionPhase.DELETING) { viewModel.stop() }
 
     // The run only lives while this screen does; keep the display awake so it is not interrupted.
     val view = LocalView.current
@@ -176,7 +181,15 @@ private fun FindingStep(state: DeletionUiState, vm: DeletionViewModel) {
 @Composable
 private fun ColumnScope.ReviewStep(state: DeletionUiState, vm: DeletionViewModel) {
     val zone = ZoneId.systemDefault()
-    Text("${state.rows.size} BB LOGS posts on @${state.handle}", style = MaterialTheme.typography.titleMedium)
+    val settled = state.rows.count { it.status != RowStatus.PENDING }
+    Text(
+        if (settled == 0) {
+            "${state.rows.size} BB LOGS posts on @${state.handle}"
+        } else {
+            "${state.rows.size - settled} left of ${state.rows.size} on @${state.handle}"
+        },
+        style = MaterialTheme.typography.titleMedium,
+    )
     Text(state.windowLabel, style = MaterialTheme.typography.bodySmall)
     if (state.truncated) {
         Text(
@@ -187,6 +200,11 @@ private fun ColumnScope.ReviewStep(state: DeletionUiState, vm: DeletionViewModel
     }
     if (state.rows.isEmpty()) {
         Text("No posts matched. Nothing to delete.")
+        Text(
+            "X does not return posts from the last few seconds, so a clip you have only just posted " +
+                "will not show up straight away.",
+            style = MaterialTheme.typography.bodySmall,
+        )
         OutlinedButton(onClick = vm::reset) { Text("Change time period") }
         return
     }
@@ -196,15 +214,21 @@ private fun ColumnScope.ReviewStep(state: DeletionUiState, vm: DeletionViewModel
     }
     LazyColumn(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
         items(state.rows, key = { it.candidate.id }) { row ->
+            val pending = row.status == RowStatus.PENDING
             Row(
-                modifier = Modifier.fillMaxWidth().clickable { vm.toggle(row.candidate.id) },
+                modifier = Modifier.fillMaxWidth().clickable(enabled = pending) { vm.toggle(row.candidate.id) },
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Checkbox(checked = row.selected, onCheckedChange = { vm.toggle(row.candidate.id) })
+                Checkbox(
+                    checked = row.selected && pending,
+                    onCheckedChange = { vm.toggle(row.candidate.id) },
+                    enabled = pending,
+                )
                 Column {
                     Text("BB LOGS - %03d".format(row.candidate.bbNumber), style = MaterialTheme.typography.bodyLarge)
                     Text(
-                        "posted ${TIME_FORMAT.format(row.candidate.postedAt.atZone(zone))}  -  id ${row.candidate.id}",
+                        "posted ${TIME_FORMAT.format(row.candidate.postedAt.atZone(zone))}" +
+                            if (pending) "  -  id ${row.candidate.id}" else "  -  ${statusLabel(row.status)}",
                         style = MaterialTheme.typography.bodySmall,
                     )
                 }
@@ -230,18 +254,19 @@ private fun ColumnScope.ReviewStep(state: DeletionUiState, vm: DeletionViewModel
 
 @Composable
 private fun ColumnScope.DeletingStep(state: DeletionUiState, vm: DeletionViewModel) {
-    val total = state.rows.count { it.selected }
-    Text("Deleting ${state.settledCount} of $total", style = MaterialTheme.typography.titleMedium)
-    LinearProgressIndicator(progress = { if (total == 0) 0f else state.settledCount.toFloat() / total }, modifier = Modifier.fillMaxWidth())
+    val total = state.runTotal
+    Text("Deleting ${state.runSettled} of $total", style = MaterialTheme.typography.titleMedium)
+    LinearProgressIndicator(
+        progress = { if (total == 0) 0f else state.runSettled.toFloat() / total },
+        modifier = Modifier.fillMaxWidth(),
+    )
     Text("One post at a time with a pause between each. Keep this screen open until it finishes.", style = MaterialTheme.typography.bodySmall)
     LazyColumn(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
         items(state.rows.filter { it.selected }, key = { it.candidate.id }) { row ->
-            val mark = when (row.status) {
-                RowStatus.DELETED -> "deleted"
-                RowStatus.ALREADY_GONE -> "already gone"
-                RowStatus.PENDING -> "waiting"
-            }
-            Text("BB LOGS - %03d  -  $mark".format(row.candidate.bbNumber), style = MaterialTheme.typography.bodyMedium)
+            Text(
+                "BB LOGS - %03d  -  %s".format(row.candidate.bbNumber, statusLabel(row.status)),
+                style = MaterialTheme.typography.bodyMedium,
+            )
         }
     }
     OutlinedButton(onClick = vm::stop, modifier = Modifier.fillMaxWidth()) { Text("Stop after the current post") }
@@ -250,6 +275,13 @@ private fun ColumnScope.DeletingStep(state: DeletionUiState, vm: DeletionViewMod
 @Composable
 private fun DoneStep(state: DeletionUiState, vm: DeletionViewModel, onOpenHistory: () -> Unit, onExit: () -> Unit) {
     val r = state.result
+    // Ticks so a "continue after <time>" button un-greys itself without the user leaving the screen.
+    val nowSec by produceState(System.currentTimeMillis() / 1000) {
+        while (true) {
+            kotlinx.coroutines.delay(1_000)
+            value = System.currentTimeMillis() / 1000
+        }
+    }
     Column(verticalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.verticalScroll(rememberScrollState())) {
         if (r != null) {
             Text(headline(r), style = MaterialTheme.typography.titleMedium)
@@ -258,11 +290,35 @@ private fun DoneStep(state: DeletionUiState, vm: DeletionViewModel, onOpenHistor
                 Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyMedium)
             }
         }
+        val remaining = state.selectedCount
+        if (remaining > 0) {
+            val waitUntil = state.resumeAllowedAtEpochSec
+            val ready = waitUntil == null || nowSec >= waitUntil
+            Button(onClick = vm::continueRemaining, enabled = ready, modifier = Modifier.fillMaxWidth()) {
+                Text(
+                    if (ready) {
+                        "Continue with the remaining $remaining"
+                    } else {
+                        "Continue in ${waitUntil - nowSec}s (X asked us to wait)"
+                    },
+                )
+            }
+            Text(
+                "Continuing reuses the list you already reviewed - X is not scanned again - and still asks you to confirm.",
+                style = MaterialTheme.typography.bodySmall,
+            )
+        }
         Text("The BB LOGS counter is unchanged: numbers are never reused.", style = MaterialTheme.typography.bodySmall)
-        Button(onClick = onOpenHistory, modifier = Modifier.fillMaxWidth()) { Text("View history") }
+        OutlinedButton(onClick = onOpenHistory, modifier = Modifier.fillMaxWidth()) { Text("View history") }
         OutlinedButton(onClick = vm::reset, modifier = Modifier.fillMaxWidth()) { Text("Start over") }
         TextButton(onClick = onExit) { Text("Done") }
     }
+}
+
+private fun statusLabel(status: RowStatus): String = when (status) {
+    RowStatus.PENDING -> "waiting"
+    RowStatus.DELETED -> "deleted"
+    RowStatus.ALREADY_GONE -> "already gone"
 }
 
 private fun headline(r: RunResult): String = when (r.stop) {

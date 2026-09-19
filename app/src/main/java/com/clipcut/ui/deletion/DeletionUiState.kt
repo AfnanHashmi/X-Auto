@@ -3,6 +3,7 @@ package com.clipcut.ui.deletion
 import com.clipcut.domain.deletion.DeletionCandidate
 import com.clipcut.domain.deletion.DeletionPreset
 import com.clipcut.domain.deletion.RunResult
+import com.clipcut.domain.deletion.RunStop
 import java.time.LocalDate
 
 enum class DeletionPhase { PICK, FINDING, REVIEW, DELETING, DONE }
@@ -27,12 +28,19 @@ data class DeletionUiState(
     val scanned: Int = 0,
     val truncated: Boolean = false,
     val confirmVisible: Boolean = false,
+    /** Progress of the run in flight only -- posts settled by an earlier run must not count towards it. */
+    val runTotal: Int = 0,
+    val runSettled: Int = 0,
     val result: RunResult? = null,
     /** Shown on the PICK screen when a find failed, verbatim from X where there is one. */
     val error: String? = null,
 ) {
+    /** Still to delete: a settled row is never counted again, however it was settled. */
     val selectedCount: Int get() = rows.count { it.selected && it.status == RowStatus.PENDING }
     val canFind: Boolean
         get() = phase == DeletionPhase.PICK && (preset != DeletionPreset.CUSTOM || (customFrom != null && customTo != null))
-    val settledCount: Int get() = rows.count { it.status != RowStatus.PENDING }
+
+    /** When a stopped run may be continued (epoch seconds), or null if it may be continued now. */
+    val resumeAllowedAtEpochSec: Long?
+        get() = (result?.stop as? RunStop.RateLimited)?.resetEpochSec
 }

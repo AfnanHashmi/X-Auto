@@ -127,12 +127,21 @@ class DeletionViewModel @Inject constructor(
         if (s.phase != DeletionPhase.REVIEW || !s.confirmVisible) return
         val queue = s.rows.filter { it.selected && it.status == RowStatus.PENDING }.map { it.candidate }
         if (queue.isEmpty()) return
-        _uiState.update { it.copy(confirmVisible = false, phase = DeletionPhase.DELETING) }
+        _uiState.update {
+            it.copy(
+                confirmVisible = false,
+                phase = DeletionPhase.DELETING,
+                runTotal = minOf(queue.size, DeletionService.MAX_PER_RUN),
+                runSettled = 0,
+                result = null,
+            )
+        }
         job = viewModelScope.launch {
             val result = try {
                 service.delete(UUID.randomUUID().toString(), queue) { id, outcome ->
                     _uiState.update { st ->
                         st.copy(
+                            runSettled = st.runSettled + 1,
                             rows = st.rows.map {
                                 if (it.candidate.id == id) {
                                     it.copy(status = if (outcome == CandidateOutcome.DELETED) RowStatus.DELETED else RowStatus.ALREADY_GONE)
@@ -152,6 +161,17 @@ class DeletionViewModel @Inject constructor(
             }
             _uiState.update { it.copy(phase = DeletionPhase.DONE, result = result) }
         }
+    }
+
+    /**
+     * Goes back to the reviewed list to finish what a capped, rate-limited or stopped run left behind,
+     * WITHOUT scanning X again (a re-scan burns the same quota the deletions need). The rows already
+     * settled stay settled, so only what is genuinely left is offered, and it still needs a confirm.
+     */
+    fun continueRemaining() {
+        val s = _uiState.value
+        if (s.phase != DeletionPhase.DONE || s.selectedCount == 0) return
+        _uiState.update { it.copy(phase = DeletionPhase.REVIEW, result = null, runTotal = 0, runSettled = 0) }
     }
 
     /** Takes effect between posts: the request in flight is allowed to finish so the log stays truthful. */

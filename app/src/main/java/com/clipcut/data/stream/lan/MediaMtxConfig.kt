@@ -10,7 +10,8 @@ import android.content.Context
 object MediaMtxConfig {
     private const val PREFS = "mediamtx"
     private const val KEY_HOST = "host"
-    const val DEFAULT_HOST = "192.168.1.11"
+    /** Only used before the PC address has ever been set in the app; edit it there, not here. */
+    const val DEFAULT_HOST = "192.168.1.4"
     private const val STREAM_PATH = "live/test"
     private const val HLS_PORT = 8888
     private const val PLAYBACK_PORT = 9996

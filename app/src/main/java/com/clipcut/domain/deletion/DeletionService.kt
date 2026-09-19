@@ -125,6 +125,24 @@ class DeletionService @Inject constructor(
         now: () -> Instant = Instant::now,
         onOutcome: (id: String, CandidateOutcome) -> Unit,
     ): RunResult {
+        // Two runs at once could each offer the same post (their find passes overlapped), so only one
+        // may hold the account at a time. The second is refused outright rather than queued.
+        if (!runLock.tryLock()) {
+            return RunResult(RunStop.HardError("Another deletion run is already going."), 0, 0, queue.size)
+        }
+        try {
+            return runDelete(runId, queue, now, onOutcome)
+        } finally {
+            runLock.unlock()
+        }
+    }
+
+    private suspend fun runDelete(
+        runId: String,
+        queue: List<DeletionCandidate>,
+        now: () -> Instant,
+        onOutcome: (id: String, CandidateOutcome) -> Unit,
+    ): RunResult {
         try {
             verifiedAccount()
         } catch (e: kotlinx.coroutines.CancellationException) {
@@ -224,6 +242,8 @@ class DeletionService @Inject constructor(
             Step.Halt(RunStop.UnknownOutcome(c.id, e.message ?: "no reply from X"))
         }
     }
+
+    private val runLock = kotlinx.coroutines.sync.Mutex()
 
     private suspend fun verifiedAccount() = client.getMe().also {
         check(it.username.equals(EXPECTED_HANDLE, ignoreCase = true)) {
