@@ -159,16 +159,12 @@ class LanReviewController(val player: ExoPlayer) {
         refresh()
     }
 
-    /**
-     * Starts (or restarts) a selection at the playhead. If an OUT is already fixed at or before the
-     * new IN, that selection is over, so OUT is released back onto the live edge for a fresh one.
-     */
+    /** Every Mark IN starts a fresh selection: any fixed OUT is released back onto the live edge. */
     fun setInAtPlayhead() {
         val epoch = epochAt(player.currentPosition) ?: return
         val end = windowEndEpoch() ?: return
-        val out = outPointEpochMs
-        if (out != null && epoch > out - MIN_CLIP_SPAN_MS) outPointEpochMs = null
-        inPointEpochMs = epoch.coerceAtMost((outPointEpochMs ?: end) - MIN_CLIP_SPAN_MS)
+        outPointEpochMs = null
+        inPointEpochMs = epoch.coerceAtMost(end - MIN_CLIP_SPAN_MS)
         refresh()
     }
 
