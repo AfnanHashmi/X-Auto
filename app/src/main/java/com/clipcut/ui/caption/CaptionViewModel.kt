@@ -12,6 +12,7 @@ import com.clipcut.data.db.UndoEntryDao
 import com.clipcut.data.db.getOrCreate
 import com.clipcut.domain.api.OutcomeUnknownException
 import com.clipcut.domain.api.CaptionEnhancer
+import com.clipcut.domain.api.CaptionMood
 import com.clipcut.domain.api.MediaAccountApi
 import com.clipcut.domain.api.MediaRef
 import com.clipcut.domain.api.MediaUploader
@@ -177,12 +178,16 @@ class CaptionViewModel @Inject constructor(
         }
     }
 
+    fun selectMood(mood: CaptionMood) {
+        _uiState.update { it.copy(mood = mood) }
+    }
+
     fun enhance() {
         commitManualEdit()
         viewModelScope.launch {
             val before = _uiState.value.caption
             _uiState.update { it.copy(isEnhancing = true) }
-            captionEnhancer.enhance(before).fold(
+            captionEnhancer.enhance(before, _uiState.value.mood).fold(
                 onSuccess = { enhanced ->
                     pushUndo(before)
                     _uiState.update { it.copy(isEnhancing = false, caption = enhanced) }

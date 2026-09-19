@@ -1,6 +1,7 @@
 package com.clipcut.ui.caption
 
 import com.clipcut.data.db.CaptionTemplate
+import com.clipcut.domain.api.CaptionMood
 import com.clipcut.domain.api.MediaRef
 import com.clipcut.domain.api.Post
 
@@ -14,6 +15,7 @@ data class CaptionUiState(
     val isEnhancing: Boolean = false,
     val canUndo: Boolean = false,
     val statusMessage: String? = null,
+    val mood: CaptionMood = CaptionMood.Default,
     /** The media post may already exist on X; uploading again needs an explicit, informed tap. */
     val uploadOutcomeUnknown: Boolean = false,
 ) {

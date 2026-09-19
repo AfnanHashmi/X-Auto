@@ -2,24 +2,20 @@ package com.clipcut.domain.api.real
 
 import com.clipcut.BuildConfig
 import com.clipcut.domain.api.CaptionEnhancer
+import com.clipcut.domain.api.CaptionMood
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
+import org.json.JSONArray
 import org.json.JSONObject
 import java.util.concurrent.TimeUnit
 import javax.inject.Inject
 
 private const val ENDPOINT = "https://api.openai.com/v1/responses"
 private const val MODEL = "gpt-5.6-luna"
-private const val INSTRUCTIONS = """You are an X caption enhancement assistant.
-Preserve meaning.
-Make captions punchy and natural.
-Use Hindi-English when appropriate.
-Do not sound AI-generated."""
-
 // A reasoning-capable model can take well past OkHttp's default 10s read timeout.
 private const val READ_TIMEOUT_SECONDS = 60L
 
@@ -30,13 +26,17 @@ private const val READ_TIMEOUT_SECONDS = 60L
 class RealCaptionEnhancer @Inject constructor(
     private val okHttpClient: OkHttpClient,
 ) : CaptionEnhancer {
-    override suspend fun enhance(text: String): Result<String> = runCatching {
+    override suspend fun enhance(text: String, mood: CaptionMood): Result<String> = runCatching {
         require(BuildConfig.OPENAI_API_KEY.isNotBlank()) { "OPENAI_API_KEY is not set in local.properties" }
 
         val body = JSONObject()
             .put("model", MODEL)
-            .put("instructions", INSTRUCTIONS)
-            .put("input", text)
+            .put(
+                "input",
+                JSONArray()
+                    .put(JSONObject().put("role", "system").put("content", buildPrompt(mood)))
+                    .put(JSONObject().put("role", "user").put("content", text)),
+            )
 
         val request = Request.Builder().url(ENDPOINT)
             .header("Authorization", "Bearer ${BuildConfig.OPENAI_API_KEY}")

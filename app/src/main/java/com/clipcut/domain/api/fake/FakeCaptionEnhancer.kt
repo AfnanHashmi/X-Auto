@@ -1,14 +1,15 @@
 package com.clipcut.domain.api.fake
 
 import com.clipcut.domain.api.CaptionEnhancer
+import com.clipcut.domain.api.CaptionMood
 import kotlinx.coroutines.delay
 import javax.inject.Inject
 
 /** Fake used until a real LLM API key is wired in. Appends a marker so the round-trip is visible. */
 class FakeCaptionEnhancer @Inject constructor() : CaptionEnhancer {
-    override suspend fun enhance(text: String): Result<String> {
+    override suspend fun enhance(text: String, mood: CaptionMood): Result<String> {
         delay(600)
         if (text.isBlank()) return Result.failure(IllegalArgumentException("Nothing to enhance"))
-        return Result.success("$text ✨")
+        return Result.success("$text ✨ [${mood.label}]")
     }
 }

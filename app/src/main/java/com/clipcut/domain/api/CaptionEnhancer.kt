@@ -8,5 +8,6 @@ package com.clipcut.domain.api
  * binding in `di/ApiModule.kt`; no caller changes.
  */
 interface CaptionEnhancer {
-    suspend fun enhance(text: String): Result<String>
+    /** Rewrites [text] in the given [mood]; the mood changes how it reads, never what it says. */
+    suspend fun enhance(text: String, mood: CaptionMood): Result<String>
 }
