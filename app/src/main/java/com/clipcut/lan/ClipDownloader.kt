@@ -106,6 +106,8 @@ class ClipDownloader(private val context: Context) {
         withContext(Dispatchers.Main) {
             val completion = CompletableDeferred<Unit>()
             val transformer = Transformer.Builder(context)
+                // Re-encode only the first GOP up to the exact start and copy the rest, instead of transcoding the whole clip.
+                .experimentalSetTrimOptimizationEnabled(true)
                 .addListener(
                     object : Transformer.Listener {
                         override fun onCompleted(composition: Composition, exportResult: ExportResult) {
