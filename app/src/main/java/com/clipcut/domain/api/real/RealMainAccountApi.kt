@@ -2,6 +2,7 @@ package com.clipcut.domain.api.real
 
 import com.clipcut.data.x.XApiClient
 import com.clipcut.domain.api.MainAccountApi
+import com.clipcut.domain.api.MainPostText
 import com.clipcut.domain.api.MediaRef
 import com.clipcut.domain.api.OutcomeUnknownException
 import com.clipcut.data.x.XApiException
@@ -21,7 +22,7 @@ class RealMainAccountApi @Inject constructor(
 ) : MainAccountApi {
     override suspend fun post(caption: String, mediaRef: MediaRef): Result<Unit> = runCatching {
         try {
-            mainAccountClient.createTweet(text = buildPostText(caption, mediaRef.url))
+            mainAccountClient.createTweet(text = MainPostText.build(caption, mediaRef.url))
         } catch (e: XApiException) {
             if ((e.httpCode ?: 0) >= 500) throw OutcomeUnknownException("Main post may have gone out: ${e.message}", e)
             throw e
@@ -29,19 +30,5 @@ class RealMainAccountApi @Inject constructor(
             throw OutcomeUnknownException("Main post may have gone out (no response): ${e.message}", e)
         }
         Unit
-    }
-
-    private companion object {
-        const val X_POST_CHAR_LIMIT = 280
-
-        /**
-         * Caption, then a newline, then the media post's URL last. The caption is trimmed to
-         * `280 - url.length - 1` (the 1 being the newline) so the URL is never the thing that
-         * overflows and gets cut.
-         */
-        fun buildPostText(caption: String, url: String): String {
-            val budget = (X_POST_CHAR_LIMIT - url.length - 1).coerceAtLeast(0)
-            return "${caption.take(budget).trimEnd()}\n$url"
-        }
     }
 }

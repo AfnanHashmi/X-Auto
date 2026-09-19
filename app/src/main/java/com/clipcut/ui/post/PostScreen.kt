@@ -35,7 +35,7 @@ fun PostScreen(
         modifier = modifier.fillMaxSize().padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
-        Text("Post", style = MaterialTheme.typography.titleLarge)
+        Text("Copy for X", style = MaterialTheme.typography.titleLarge)
 
         when {
             state.isPosting -> Column(
@@ -44,7 +44,7 @@ fun PostScreen(
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 CircularProgressIndicator()
-                Text("Posting...")
+                Text("Copying to clipboard...")
             }
 
             state.isPosted -> Column(
@@ -52,7 +52,10 @@ fun PostScreen(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
-                Text("Posted!", style = MaterialTheme.typography.headlineSmall)
+                Text("Copied to clipboard", style = MaterialTheme.typography.headlineSmall)
+                Text("Paste it into a new post on your main account:", style = MaterialTheme.typography.bodyMedium)
+                Text(state.copiedText, style = MaterialTheme.typography.bodyMedium)
+                Button(onClick = viewModel::post) { Text("Copy again") }
                 Button(onClick = onDone) { Text("Done") }
             }
 
@@ -61,7 +64,7 @@ fun PostScreen(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
-                Text("Post failed: ${state.errorMessage}", color = MaterialTheme.colorScheme.error)
+                Text("Copy failed: ${state.errorMessage}", color = MaterialTheme.colorScheme.error)
                 Button(onClick = viewModel::post) { Text("Retry") }
             }
         }

@@ -147,7 +147,7 @@ fun CaptionScreen(
             enabled = state.canProceedToPost,
             modifier = Modifier.fillMaxWidth(),
         ) {
-            Text("Continue to post")
+            Text("Copy caption + link")
         }
     }
 }

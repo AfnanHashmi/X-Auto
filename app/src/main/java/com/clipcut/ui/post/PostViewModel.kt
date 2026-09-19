@@ -6,8 +6,8 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.clipcut.data.db.ClipRecordDao
 import com.clipcut.data.db.getOrCreate
-import com.clipcut.domain.api.OutcomeUnknownException
 import com.clipcut.domain.api.MainAccountApi
+import com.clipcut.domain.api.MainPostText
 import com.clipcut.domain.api.MediaRef
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -18,6 +18,12 @@ import kotlinx.coroutines.launch
 import java.io.File
 import javax.inject.Inject
 
+/**
+ * The main-account step: copies "caption + embed link" to the clipboard for the user to post
+ * manually. Nothing is published from here, so unlike a real post there is no duplicate risk and
+ * this can run again whenever the screen is (re)entered -- which also re-fills a clipboard that was
+ * overwritten in the meantime.
+ */
 @HiltViewModel
 class PostViewModel @Inject constructor(
     savedStateHandle: SavedStateHandle,
@@ -30,68 +36,26 @@ class PostViewModel @Inject constructor(
         id = Uri.decode(checkNotNull(savedStateHandle["mediaRefId"])),
         url = Uri.decode(checkNotNull(savedStateHandle["mediaRefUrl"])),
     )
+    private val caption = Uri.decode(checkNotNull(savedStateHandle["caption"]))
 
     private val _uiState = MutableStateFlow(
-        PostUiState(caption = Uri.decode(checkNotNull(savedStateHandle["caption"]))),
+        PostUiState(caption = caption, copiedText = MainPostText.build(caption, mediaRef.url)),
     )
     val uiState: StateFlow<PostUiState> = _uiState.asStateFlow()
 
     fun post() {
-        // Posting is irreversible and this is called both automatically on screen entry and from
-        // the Retry button, so guard against a second in-flight or repeat post: a duplicate tweet
-        // is exactly the pattern that gets an account flagged.
-        if (_uiState.value.isPosting || _uiState.value.isPosted) return
+        if (_uiState.value.isPosting) return
         viewModelScope.launch {
-            val record = clipRecordDao.getOrCreate(clipPath)
-            if (record.posted) {
-                _uiState.update { it.copy(isPosting = false, isPosted = true) }
-                return@launch
-            }
-            if (record.postAttempted) {
-                // The app died between marking postAttempted and clearing it below -- meaning we
-                // never got a response, so we genuinely don't know if the post went out. Retrying
-                // blind risks a duplicate; surface it instead of guessing.
-                _uiState.update {
-                    it.copy(
-                        isPosting = false,
-                        errorMessage = "Couldn't confirm whether this posted before the app closed. " +
-                            "Check your main account on X before retrying.",
-                    )
-                }
-                return@launch
-            }
-
             _uiState.update { it.copy(isPosting = true, errorMessage = null) }
-            clipRecordDao.update(record.copy(postAttempted = true))
-
-            mainAccountApi.post(_uiState.value.caption, mediaRef).fold(
+            mainAccountApi.post(caption, mediaRef).fold(
                 onSuccess = {
                     _uiState.update { it.copy(isPosting = false, isPosted = true) }
-                    clipRecordDao.findByPath(clipPath)?.let {
-                        clipRecordDao.update(it.copy(posted = true, postAttempted = false))
-                    }
-                    // The clip only ever needed to be readable up to this point (upload already
-                    // happened from the CaptionViewModel's cache copy, posting just links to it);
-                    // nothing else in the app reads this file again. The gallery copy in
-                    // Movies/ClipCut is untouched -- that's the kept, user-facing record.
+                    clipRecordDao.getOrCreate(clipPath).let { clipRecordDao.update(it.copy(posted = true)) }
+                    // The cache copy is no longer needed; the gallery copy in Movies/ClipCut is kept.
                     runCatching { File(clipPath).delete() }
                 },
                 onFailure = { e ->
-                    if (e is OutcomeUnknownException) {
-                        // No definitive reply: leave postAttempted set so Retry cannot double-post.
-                        _uiState.update {
-                            it.copy(
-                                isPosting = false,
-                                errorMessage = "No reply from X, so this may have posted. " +
-                                    "Check your main account on X before retrying.",
-                            )
-                        }
-                    } else {
-                        _uiState.update { it.copy(isPosting = false, errorMessage = e.message ?: "Unknown error") }
-                        clipRecordDao.findByPath(clipPath)?.let {
-                            clipRecordDao.update(it.copy(postAttempted = false))
-                        }
-                    }
+                    _uiState.update { it.copy(isPosting = false, errorMessage = e.message ?: "Unknown error") }
                 },
             )
         }
