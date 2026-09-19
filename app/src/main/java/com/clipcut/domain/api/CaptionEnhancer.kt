@@ -10,4 +10,11 @@ package com.clipcut.domain.api
 interface CaptionEnhancer {
     /** Rewrites [text] in the given [mood]; the mood changes how it reads, never what it says. */
     suspend fun enhance(text: String, mood: CaptionMood): Result<String>
+
+    /**
+     * Enhances ONLY the [heading] and [caption] of a templated post, returning the pair. The
+     * template's [fixedLabel] is never sent as text to rewrite and is never returned. A blank part is
+     * left untouched (returned as given).
+     */
+    suspend fun enhanceTemplate(heading: String, caption: String, mood: CaptionMood, fixedLabel: String): Result<Pair<String, String>>
 }

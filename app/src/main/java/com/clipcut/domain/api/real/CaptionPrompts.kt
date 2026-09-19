@@ -221,10 +221,68 @@ Quotation marks around the entire caption
 
 The output must be ready to copy directly into X."""
 
-/** The master prompt plus the selected mood's block, exactly as specified for the backend. */
-internal fun buildPrompt(mood: CaptionMood): String = """
-$MASTER_SYSTEM_PROMPT
+private const val AUTO_BLOCK = """━━━━━━━━━━━━━━━━━━━━
+SELECTED MOOD
+━━━━━━━━━━━━━━━━━━━━
 
+Mood: Auto
+
+Analyze the emotional character of the user's caption and automatically select the most appropriate mood from:
+
+Dialogue
+Fight
+Singing
+Fun
+Bashing
+Expose
+Emotional
+Appreciation
+Savage
+Shock
+Cute
+Victory
+Frustration
+Confession
+Episode
+
+Do not tell the user which mood was selected.
+Simply enhance the caption using the most appropriate style.
+
+Remember:
+The mood changes HOW the caption is expressed.
+It must not change WHAT actually happened."""
+
+/** Appended when the post is a templated one: the label is the app's, and only two parts exist. */
+private const val TEMPLATE_BLOCK = """━━━━━━━━━━━━━━━━━━━━
+TEMPLATE MODE
+━━━━━━━━━━━━━━━━━━━━
+
+The user's input is a post with a HEADING and/or a CAPTION. The post also has a fixed label
+(for example "BB Episode Logs - ") that the app adds by itself. NEVER write, repeat, reword or
+mention that label.
+
+HEADING rules:
+• A short headline: at most about 8 words, one line.
+• No hashtags, no quotation marks. At most one emoji, and usually none.
+• It is the title of the post, not a sentence of the caption.
+
+CAPTION rules:
+• Enhance it exactly as described above.
+
+Only enhance the parts you are given. Reply in EXACTLY this format and nothing else:
+
+HEADING: <the enhanced heading>
+CAPTION: <the enhanced caption>
+
+Leave out a part's line if that part was not given. The caption may span several lines and
+continues to the end of your reply."""
+
+/**
+ * The master prompt plus the selected mood's block, exactly as specified for the backend; Auto swaps
+ * in the "pick the best mood" block, and [templateMode] appends the heading/caption rules.
+ */
+internal fun buildPrompt(mood: CaptionMood, templateMode: Boolean = false): String {
+    val moodBlock = if (mood == CaptionMood.AUTO) AUTO_BLOCK else """
 ━━━━━━━━━━━━━━━━━━━━
 SELECTED MOOD
 ━━━━━━━━━━━━━━━━━━━━
@@ -250,3 +308,6 @@ Remember:
 The mood changes HOW the caption is expressed.
 It must not change WHAT actually happened.
 """.trim()
+    val template = if (templateMode) "\n\n$TEMPLATE_BLOCK" else ""
+    return "$MASTER_SYSTEM_PROMPT\n\n$moodBlock$template".trim()
+}

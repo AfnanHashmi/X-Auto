@@ -12,4 +12,18 @@ class FakeCaptionEnhancer @Inject constructor() : CaptionEnhancer {
         if (text.isBlank()) return Result.failure(IllegalArgumentException("Nothing to enhance"))
         return Result.success("$text ✨ [${mood.label}]")
     }
+
+    override suspend fun enhanceTemplate(
+        heading: String,
+        caption: String,
+        mood: CaptionMood,
+        fixedLabel: String,
+    ): Result<Pair<String, String>> {
+        delay(600)
+        if (heading.isBlank() && caption.isBlank()) return Result.failure(IllegalArgumentException("Nothing to enhance"))
+        return Result.success(
+            (if (heading.isBlank()) heading else "$heading ✨") to
+                (if (caption.isBlank()) caption else "$caption ✨ [${mood.label}]"),
+        )
+    }
 }

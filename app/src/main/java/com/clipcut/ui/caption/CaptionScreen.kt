@@ -2,19 +2,25 @@ package com.clipcut.ui.caption
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -32,6 +38,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
+import com.clipcut.domain.api.CaptionFormat
 import com.clipcut.domain.api.CaptionMood
 import com.clipcut.domain.api.MediaRef
 
@@ -46,7 +53,7 @@ fun CaptionScreen(
     var showSaveTemplate by remember { mutableStateOf(false) }
 
     Column(
-        modifier = modifier.fillMaxSize().padding(16.dp),
+        modifier = modifier.fillMaxSize().imePadding().verticalScroll(rememberScrollState()).padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         Text("Caption", style = MaterialTheme.typography.titleLarge)
@@ -76,20 +83,65 @@ fun CaptionScreen(
             }
         }
 
-        OutlinedTextField(
-            value = state.caption,
-            onValueChange = viewModel::updateCaption,
-            label = { Text("Caption") },
-            modifier = Modifier.fillMaxWidth().onFocusChanged { focus ->
-                if (!focus.isFocused) viewModel.commitManualEdit()
-            },
-            minLines = 3,
-        )
+        val formatted = state.formatted
+        Text("Format", style = MaterialTheme.typography.labelMedium)
+        @OptIn(ExperimentalLayoutApi::class)
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            CaptionFormat.entries.forEach { format ->
+                FilterChip(
+                    selected = formatted.format == format,
+                    onClick = { viewModel.selectFormat(format) },
+                    label = { Text(format.label) },
+                )
+            }
+        }
 
-        MoodDropdown(selected = state.mood, onSelect = viewModel::selectMood, enabled = !state.isEnhancing)
+        if (formatted.format.prefix == null) {
+            OutlinedTextField(
+                value = state.caption,
+                onValueChange = viewModel::updateCaption,
+                label = { Text("Caption") },
+                modifier = Modifier.fillMaxWidth().onFocusChanged { focus ->
+                    if (!focus.isFocused) viewModel.commitManualEdit()
+                },
+                minLines = 3,
+            )
+        } else {
+            // The label is fixed: shown, but not editable and never sent to the AI.
+            Surface(color = MaterialTheme.colorScheme.surfaceVariant, modifier = Modifier.fillMaxWidth()) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                ) {
+                    Text(formatted.format.prefix!!.trimEnd(), style = MaterialTheme.typography.titleSmall)
+                    Text("fixed", style = MaterialTheme.typography.labelSmall)
+                }
+            }
+            OutlinedTextField(
+                value = formatted.heading,
+                onValueChange = viewModel::updateHeading,
+                label = { Text("Heading") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth().onFocusChanged { focus ->
+                    if (!focus.isFocused) viewModel.commitManualEdit()
+                },
+            )
+            OutlinedTextField(
+                value = formatted.body,
+                onValueChange = viewModel::updateBody,
+                label = { Text("Caption") },
+                modifier = Modifier.fillMaxWidth().onFocusChanged { focus ->
+                    if (!focus.isFocused) viewModel.commitManualEdit()
+                },
+                minLines = 3,
+            )
+        }
+
+        MoodPicker(selected = state.mood, onSelect = viewModel::selectMood, enabled = !state.isEnhancing)
 
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Button(onClick = viewModel::enhance, enabled = !state.isEnhancing && state.caption.isNotBlank()) {
+            Button(onClick = viewModel::enhance, enabled = state.canEnhance) {
                 if (state.isEnhancing) {
                     CircularProgressIndicator(modifier = Modifier.padding(end = 8.dp))
                 }
@@ -130,13 +182,13 @@ fun CaptionScreen(
                         newTemplateTitle = ""
                         showSaveTemplate = false
                     },
-                    enabled = newTemplateTitle.isNotBlank() && state.caption.isNotBlank(),
+                    enabled = newTemplateTitle.isNotBlank() && state.hasContent,
                 ) {
                     Text("Save")
                 }
             }
         } else {
-            TextButton(onClick = { showSaveTemplate = true }, enabled = state.caption.isNotBlank()) {
+            TextButton(onClick = { showSaveTemplate = true }, enabled = state.hasContent) {
                 Text("Save current caption as template")
             }
         }
@@ -158,30 +210,73 @@ fun CaptionScreen(
     }
 }
 
-/** Mood picker: one full-width button showing the current mood, with a down arrow at its right edge. */
+private val MOOD_GROUPS = listOf(
+    "🔥  Energy" to listOf(CaptionMood.FIGHT, CaptionMood.BASHING, CaptionMood.SAVAGE, CaptionMood.VICTORY, CaptionMood.SHOCK),
+    "🎭  Expression" to listOf(CaptionMood.DIALOGUE, CaptionMood.FUN, CaptionMood.SINGING, CaptionMood.EMOTIONAL, CaptionMood.CUTE),
+    "👀  Commentary" to listOf(
+        CaptionMood.EXPOSE, CaptionMood.CONFESSION, CaptionMood.FRUSTRATION, CaptionMood.APPRECIATION, CaptionMood.EPISODE,
+    ),
+)
+
+/**
+ * Mood picker. A full-width button shows the current mood with a down arrow at its right edge;
+ * tapping it opens a bottom sheet: Auto on top as a wide card, then the 15 moods as chips grouped
+ * into Energy / Expression / Commentary.
+ */
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
-private fun MoodDropdown(selected: CaptionMood, onSelect: (CaptionMood) -> Unit, enabled: Boolean) {
-    var expanded by remember { mutableStateOf(false) }
-    Box(modifier = Modifier.fillMaxWidth()) {
-        OutlinedButton(onClick = { expanded = true }, enabled = enabled, modifier = Modifier.fillMaxWidth()) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text("${selected.emoji}  ${selected.label}")
-                Text("\u25BE") // down-pointing triangle
-            }
+private fun MoodPicker(selected: CaptionMood, onSelect: (CaptionMood) -> Unit, enabled: Boolean) {
+    var open by remember { mutableStateOf(false) }
+    OutlinedButton(onClick = { open = true }, enabled = enabled, modifier = Modifier.fillMaxWidth()) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text("${selected.emoji}  ${selected.label}")
+            Text("\u25BE") // down-pointing triangle
         }
-        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-            CaptionMood.entries.forEach { mood ->
-                DropdownMenuItem(
-                    text = { Text("${mood.emoji}  ${mood.label}") },
-                    onClick = {
-                        onSelect(mood)
-                        expanded = false
-                    },
-                )
+    }
+    if (open) {
+        ModalBottomSheet(
+            onDismissRequest = { open = false },
+            sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+        ) {
+            fun pick(mood: CaptionMood) {
+                onSelect(mood)
+                open = false
+            }
+            Column(
+                modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, bottom = 32.dp),
+                verticalArrangement = Arrangement.spacedBy(14.dp),
+            ) {
+                Text("How should it sound?", style = MaterialTheme.typography.titleMedium)
+
+                if (selected == CaptionMood.AUTO) {
+                    Button(onClick = { pick(CaptionMood.AUTO) }, modifier = Modifier.fillMaxWidth()) {
+                        Text("✨  Auto  \u2013  picks the best fit")
+                    }
+                } else {
+                    OutlinedButton(onClick = { pick(CaptionMood.AUTO) }, modifier = Modifier.fillMaxWidth()) {
+                        Text("✨  Auto  \u2013  picks the best fit")
+                    }
+                }
+
+                MOOD_GROUPS.forEach { (title, moods) ->
+                    Text(title, style = MaterialTheme.typography.labelLarge)
+                    FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        moods.forEach { mood ->
+                            FilterChip(
+                                selected = mood == selected,
+                                onClick = { pick(mood) },
+                                label = { Text("${mood.emoji}  ${mood.label}") },
+                            )
+                        }
+                    }
+                }
             }
         }
     }

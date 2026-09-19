@@ -12,6 +12,8 @@ import com.clipcut.data.db.UndoEntryDao
 import com.clipcut.data.db.getOrCreate
 import com.clipcut.domain.api.OutcomeUnknownException
 import com.clipcut.domain.api.CaptionEnhancer
+import com.clipcut.domain.api.CaptionFormat
+import com.clipcut.domain.api.CaptionFormatText
 import com.clipcut.domain.api.CaptionMood
 import com.clipcut.domain.api.MediaAccountApi
 import com.clipcut.domain.api.MediaRef
@@ -182,12 +184,41 @@ class CaptionViewModel @Inject constructor(
         _uiState.update { it.copy(mood = mood) }
     }
 
+    /** Switches the post layout, keeping what was typed: plain text becomes the caption of a templated post. */
+    fun selectFormat(format: CaptionFormat) {
+        commitManualEdit()
+        val before = _uiState.value.caption
+        val p = CaptionFormatText.parse(before)
+        if (p.format == format) return
+        pushUndo(before)
+        _uiState.update { it.copy(caption = CaptionFormatText.compose(format, p.heading, p.body)) }
+    }
+
+    fun updateHeading(heading: String) {
+        val p = CaptionFormatText.parse(_uiState.value.caption)
+        updateCaption(CaptionFormatText.compose(p.format, heading.replace("\n", " "), p.body))
+    }
+
+    fun updateBody(body: String) {
+        val p = CaptionFormatText.parse(_uiState.value.caption)
+        updateCaption(CaptionFormatText.compose(p.format, p.heading, body))
+    }
+
+    /** Plain posts enhance as one caption; templated ones enhance only heading + caption, never the label. */
+    private suspend fun runEnhance(before: String): Result<String> {
+        val mood = _uiState.value.mood
+        val p = CaptionFormatText.parse(before)
+        val label = p.format.prefix ?: return captionEnhancer.enhance(before, mood)
+        return captionEnhancer.enhanceTemplate(p.heading, p.body, mood, label)
+            .map { (heading, body) -> CaptionFormatText.compose(p.format, heading, body) }
+    }
+
     fun enhance() {
         commitManualEdit()
         viewModelScope.launch {
             val before = _uiState.value.caption
             _uiState.update { it.copy(isEnhancing = true) }
-            captionEnhancer.enhance(before, _uiState.value.mood).fold(
+            runEnhance(before).fold(
                 onSuccess = { enhanced ->
                     pushUndo(before)
                     _uiState.update { it.copy(isEnhancing = false, caption = enhanced) }

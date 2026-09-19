@@ -19,13 +19,13 @@ class CaptionPromptsTest {
                 "Dialogue", "Fight", "Singing", "Fun", "Bashing", "Expose", "Emotional", "Appreciation",
                 "Savage", "Shock", "Cute", "Victory", "Frustration", "Confession", "Episode",
             ),
-            CaptionMood.entries.map { it.label },
+            CaptionMood.entries.filter { it != CaptionMood.AUTO }.map { it.label },
         )
     }
 
     @Test
     fun everyPromptHasTheMasterPromptAndItsOwnMoodBlock() {
-        for (mood in CaptionMood.entries) {
+        for (mood in CaptionMood.entries.filter { it != CaptionMood.AUTO }) {
             val p = buildPrompt(mood)
             assertTrue("master prompt missing for ${mood.label}", p.startsWith("You are an expert X (Twitter) caption editor"))
             assertTrue(p.contains("Mood: ${mood.label}\n"))
@@ -48,5 +48,27 @@ class CaptionPromptsTest {
         assertEquals(10, CaptionMood.SAVAGE.intensity)
         assertEquals(1, CaptionMood.CONFESSION.emojiLevel)
         assertEquals("headline + commentary", CaptionMood.EPISODE.structure)
+    }
+
+    @Test
+    fun autoAsksTheModelToPickFromAllFifteenAndNotToSayWhich() {
+        val p = buildPrompt(CaptionMood.AUTO)
+        assertTrue(p.startsWith("You are an expert X (Twitter) caption editor"))
+        assertTrue(p.contains("Mood: Auto"))
+        for (mood in CaptionMood.entries.filter { it != CaptionMood.AUTO }) {
+            assertTrue("Auto prompt should list ${mood.label}", p.contains("\n${mood.label}\n"))
+        }
+        assertTrue(p.contains("Do not tell the user which mood was selected."))
+        assertFalse(p.contains("Intensity:"))
+    }
+
+    @Test
+    fun templateModeAddsTheHeadingRulesOnlyWhenAsked() {
+        assertFalse(buildPrompt(CaptionMood.FIGHT).contains("TEMPLATE MODE"))
+        val t = buildPrompt(CaptionMood.FIGHT, templateMode = true)
+        assertTrue(t.contains("TEMPLATE MODE"))
+        assertTrue(t.contains("NEVER write, repeat, reword or"))
+        assertTrue(t.contains("HEADING: <the enhanced heading>"))
+        assertTrue(t.contains("Mood: Fight"))
     }
 }

@@ -20,13 +20,37 @@ private const val MODEL = "gpt-5.6-luna"
 private const val READ_TIMEOUT_SECONDS = 60L
 
 /**
- * Rewrites the caption via the OpenAI Responses API. Never posts anything: the result only replaces
+ * Rewrites captions via the OpenAI Responses API. Never posts anything: the result only replaces
  * the text in the caption box (with an undo step), and the user still reviews it before posting.
  */
 class RealCaptionEnhancer @Inject constructor(
     private val okHttpClient: OkHttpClient,
 ) : CaptionEnhancer {
     override suspend fun enhance(text: String, mood: CaptionMood): Result<String> = runCatching {
+        complete(system = buildPrompt(mood), user = text)
+    }
+
+    override suspend fun enhanceTemplate(
+        heading: String,
+        caption: String,
+        mood: CaptionMood,
+        fixedLabel: String,
+    ): Result<Pair<String, String>> = runCatching {
+        val wantHeading = heading.isNotBlank()
+        val wantCaption = caption.isNotBlank()
+        require(wantHeading || wantCaption) { "Nothing to enhance" }
+
+        // Only the heading and caption text is sent; the fixed label never reaches the model.
+        val user = buildString {
+            if (wantHeading) append("HEADING: ").append(heading.trim()).append('\n')
+            if (wantCaption) append("CAPTION: ").append(caption.trim())
+        }.trim()
+        val reply = complete(system = buildPrompt(mood, templateMode = true), user = user)
+        val parsed = parseTemplateReply(reply, wantHeading, wantCaption, fixedLabel)
+        (parsed.heading ?: heading) to (parsed.caption ?: caption)
+    }
+
+    private suspend fun complete(system: String, user: String): String {
         require(BuildConfig.OPENAI_API_KEY.isNotBlank()) { "OPENAI_API_KEY is not set in local.properties" }
 
         val body = JSONObject()
@@ -34,8 +58,8 @@ class RealCaptionEnhancer @Inject constructor(
             .put(
                 "input",
                 JSONArray()
-                    .put(JSONObject().put("role", "system").put("content", buildPrompt(mood)))
-                    .put(JSONObject().put("role", "user").put("content", text)),
+                    .put(JSONObject().put("role", "system").put("content", system))
+                    .put(JSONObject().put("role", "user").put("content", user)),
             )
 
         val request = Request.Builder().url(ENDPOINT)
@@ -45,7 +69,7 @@ class RealCaptionEnhancer @Inject constructor(
             .build()
 
         val client = okHttpClient.newBuilder().readTimeout(READ_TIMEOUT_SECONDS, TimeUnit.SECONDS).build()
-        withContext(Dispatchers.IO) {
+        return withContext(Dispatchers.IO) {
             client.newCall(request).execute().use { response ->
                 val responseText = response.body?.string().orEmpty()
                 check(response.isSuccessful) { "OpenAI request failed: HTTP ${response.code}: $responseText" }

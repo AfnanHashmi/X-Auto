@@ -175,6 +175,14 @@ Focus on the moment, development, reaction, or game dynamics already present.
 Use concise commentary language suitable for X.
 The result should feel like it belongs to a live reality-show conversation.
 """,
+    ),
+
+    /** Not a mood of its own: the model picks whichever of the 15 fits the caption best. */
+    AUTO(
+        "✨", "Auto",
+        tone = "chosen automatically", intensity = 0,
+        structure = "chosen automatically", emojiLevel = 0,
+        instructions = "",
     );
 
     companion object {
