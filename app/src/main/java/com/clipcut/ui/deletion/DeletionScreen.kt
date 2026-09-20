@@ -80,7 +80,7 @@ fun DeletionScreen(
 
     Screen(
         title = "Trigger Deletion",
-        subtitle = "Delete BB LOGS posts from @${DeletionService.EXPECTED_HANDLE}",
+        subtitle = "Delete posts from @${DeletionService.EXPECTED_HANDLE} in a time period",
         modifier = modifier,
     ) {
         when (state.phase) {
@@ -104,8 +104,8 @@ private fun PickStep(state: DeletionUiState, vm: DeletionViewModel, onOpenHistor
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         WarningCard(
-            "Only @${DeletionService.EXPECTED_HANDLE}'s own posts that read exactly \"BB LOGS - NNN\" can be deleted here. " +
-                "Your main account is never touched. Nothing is deleted until you review the list and confirm.",
+            "Every post @${DeletionService.EXPECTED_HANDLE} made in the chosen period is listed, whatever it says. " +
+                "Your main account is never touched. Nothing is deleted until you review the list and confirm, and deleted posts cannot be restored.",
         )
 
         SectionCard("Time period") {
@@ -183,7 +183,7 @@ private fun ColumnScope.ReviewStep(state: DeletionUiState, vm: DeletionViewModel
     val settled = state.rows.count { it.status != RowStatus.PENDING }
     Text(
         if (settled == 0) {
-            "${state.rows.size} BB LOGS posts on @${state.handle}"
+            "${state.rows.size} posts on @${state.handle}"
         } else {
             "${state.rows.size - settled} left of ${state.rows.size} on @${state.handle}"
         },
@@ -224,7 +224,7 @@ private fun ColumnScope.ReviewStep(state: DeletionUiState, vm: DeletionViewModel
                     enabled = pending,
                 )
                 Column {
-                    Text("BB LOGS - %03d".format(row.candidate.bbNumber), style = MaterialTheme.typography.bodyLarge)
+                    Text(candidateTitle(row.candidate), style = MaterialTheme.typography.bodyLarge, maxLines = 2)
                     Text(
                         "posted ${TIME_FORMAT.format(row.candidate.postedAt.atZone(zone))}" +
                             if (pending) "  -  id ${row.candidate.id}" else "  -  ${statusLabel(row.status)}",
@@ -263,7 +263,7 @@ private fun ColumnScope.DeletingStep(state: DeletionUiState, vm: DeletionViewMod
     LazyColumn(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
         items(state.rows.filter { it.selected }, key = { it.candidate.id }) { row ->
             Text(
-                "BB LOGS - %03d  -  %s".format(row.candidate.bbNumber, statusLabel(row.status)),
+                "${candidateTitle(row.candidate).take(48)}  -  ${statusLabel(row.status)}",
                 style = MaterialTheme.typography.bodyMedium,
             )
         }
@@ -314,6 +314,10 @@ private fun DoneStep(state: DeletionUiState, vm: DeletionViewModel, onOpenHistor
     }
 }
 
+/** A BB LOGS post keeps its familiar name; anything else is shown as its text so it can be recognised. */
+private fun candidateTitle(c: com.clipcut.domain.deletion.DeletionCandidate): String =
+    c.bbNumber?.let { "BB LOGS - %03d".format(it) } ?: c.text.replace(Regex("\\s+"), " ").trim().take(90).ifEmpty { "(no text)" }
+
 private fun statusLabel(status: RowStatus): String = when (status) {
     RowStatus.PENDING -> "waiting"
     RowStatus.DELETED -> "deleted"
@@ -359,7 +363,7 @@ private fun ConfirmDialog(state: DeletionUiState, vm: DeletionViewModel) {
         text = {
             Text(
                 "This permanently deletes $n posts posted between ${state.windowLabel}. Every one reads exactly " +
-                    "\"BB LOGS - NNN\". Your main account is not touched. This cannot be undone.\n\n" +
+                    "the account's own posts, whatever they say. Your main account is not touched. This cannot be undone.\n\n" +
                     "They are deleted one at a time with a pause between each, and you can stop at any point.",
             )
         },

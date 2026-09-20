@@ -199,12 +199,12 @@ class XApiClient(
     }
 
     /**
-     * One page of this account's own timeline inside [start, end], replies and retweets excluded
+     * One page of this account's own timeline inside [start, end], reposts excluded
      * server-side (callers still re-check). Read-only.
      *
      * Every query parameter is signed AND put on the wire in the same RFC 3986 encoding, so the
-     * signature base string and the URL can never disagree -- `exclude=replies,retweets` contains a
-     * comma, exactly the kind of character an encoder mismatch breaks.
+     * signature base string and the URL can never disagree -- `tweet.fields=created_at,referenced_tweets`
+     * contains a comma, exactly the kind of character an encoder mismatch breaks.
      */
     suspend fun getTimelinePage(
         userId: String,
@@ -218,7 +218,7 @@ class XApiClient(
             put("max_results", maxResults.coerceIn(5, 100).toString())
             put("start_time", start.truncatedTo(ChronoUnit.SECONDS).toString())
             put("end_time", end.truncatedTo(ChronoUnit.SECONDS).toString())
-            put("exclude", "replies,retweets")
+            put("exclude", "retweets")
             put("tweet.fields", "created_at,referenced_tweets")
             paginationToken?.let { put("pagination_token", it) }
         }

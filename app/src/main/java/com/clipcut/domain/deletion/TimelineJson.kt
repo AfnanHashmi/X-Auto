@@ -3,8 +3,8 @@ package com.clipcut.domain.deletion
 import org.json.JSONObject
 import java.time.Instant
 
-/** [isReferencing] is true for replies, retweets and quotes (any `referenced_tweets` entry). */
-data class TimelinePost(val id: String, val text: String, val createdAt: Instant, val isReferencing: Boolean = false)
+/** [isRetweet] is true for a plain repost: it is not a post of its own and this endpoint does not un-repost it. */
+data class TimelinePost(val id: String, val text: String, val createdAt: Instant, val isRetweet: Boolean = false)
 data class TimelinePage(val posts: List<TimelinePost>, val nextToken: String?)
 
 /**
@@ -25,7 +25,9 @@ fun parseTimelinePage(body: String): TimelinePage {
                     id = o.getString("id"),
                     text = o.optString("text"),
                     createdAt = Instant.parse(createdAt),
-                    isReferencing = (o.optJSONArray("referenced_tweets")?.length() ?: 0) > 0,
+                    isRetweet = o.optJSONArray("referenced_tweets").let { refs ->
+                        refs != null && (0 until refs.length()).any { refs.getJSONObject(it).optString("type") == "retweeted" }
+                    },
                 ),
             )
         }

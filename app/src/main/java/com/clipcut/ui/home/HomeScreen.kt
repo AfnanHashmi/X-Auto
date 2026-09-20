@@ -94,7 +94,7 @@ fun HomeScreen(modifier: Modifier = Modifier, viewModel: HomeViewModel = hiltVie
             )
             FeatureCard(
                 title = "Trigger Deletion",
-                body = "Review and delete BB LOGS posts from a chosen time period.",
+                body = "Review and delete the media account's posts from a chosen time period.",
                 status = "Media account only",
                 onClick = { DeletionActivity.start(context) },
             )

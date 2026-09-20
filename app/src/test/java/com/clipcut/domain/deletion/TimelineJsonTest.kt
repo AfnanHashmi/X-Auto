@@ -19,7 +19,7 @@ class TimelineJsonTest {
         assertEquals(listOf("1", "2"), page.posts.map { it.id })
         assertEquals(Instant.parse("2026-09-19T16:35:27Z"), page.posts[0].createdAt)
         assertEquals("abc123", page.nextToken)
-        assertFalse(page.posts[0].isReferencing)
+        assertFalse(page.posts[0].isRetweet)
     }
 
     @Test
@@ -30,12 +30,21 @@ class TimelineJsonTest {
     }
 
     @Test
-    fun repliesRetweetsAndQuotesAreFlagged() {
+    fun onlyARepostIsFlaggedNotAReply() {
         val page = parseTimelinePage(
             """{"data":[{"id":"9","text":"x","created_at":"2026-09-19T16:35:27.000Z",
                 "referenced_tweets":[{"type":"replied_to","id":"5"}]}]}""",
         )
-        assertTrue(page.posts.single().isReferencing)
+        assertFalse(page.posts.single().isRetweet) // a reply is a post of the account's own and is deletable
+    }
+
+    @Test
+    fun aPlainRepostIsFlagged() {
+        val page = parseTimelinePage(
+            """{"data":[{"id":"9","text":"RT @x: hi","created_at":"2026-09-19T16:35:27.000Z",
+                "referenced_tweets":[{"type":"retweeted","id":"5"}]}]}""",
+        )
+        assertTrue(page.posts.single().isRetweet)
     }
 
     @Test

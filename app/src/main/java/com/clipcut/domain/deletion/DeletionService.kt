@@ -21,7 +21,8 @@ import kotlin.random.Random
 data class DeletionCandidate(
     val id: String,
     val text: String,
-    val bbNumber: Int,
+    /** The NNN if this happens to be a BB LOGS post, else null. Informational only: it gates nothing. */
+    val bbNumber: Int?,
     val postedAt: Instant,
 )
 
@@ -58,13 +59,14 @@ data class RunResult(
 )
 
 /**
- * Finds and deletes the media account's own "BB LOGS - NNN" posts.
+ * Finds and deletes the media account's own posts inside a time window.
  *
  * Deletion is the one irreversible thing this app does, and the account's standing is at stake, so
  * every rule lives here in code rather than in the UI:
  *  - only the media account, and only after its handle is verified to be [EXPECTED_HANDLE] (a swapped
  *    credential block must fail closed, not quietly delete from the wrong account);
- *  - only posts from that account's own timeline, inside the window, that match [isBbLogsPost];
+ *  - only posts from that account's own timeline, inside the window (any text: the BB LOGS-only rule
+ *    was deliberately lifted, so the window, the review list and the confirm are the guards now);
  *  - finding is read-only and completes before any delete;
  *  - deletes are strictly sequential and paced with jitter, capped per run and per 24 hours,
  *    cancellable only *between* posts, and stop on the first hard error or rate limit.
@@ -94,11 +96,10 @@ class DeletionService @Inject constructor(
                 pages++
                 scanned += page.posts.size
                 for (p in page.posts) {
-                    val n = bbNumber(p.text) ?: continue
-                    if (p.isReferencing) continue
+                    if (p.isRetweet) continue
                     if (p.createdAt < range.start || p.createdAt >= range.endExclusive) continue
                     if (p.id in blocked) continue
-                    candidates.putIfAbsent(p.id, DeletionCandidate(p.id, p.text, n, p.createdAt))
+                    candidates.putIfAbsent(p.id, DeletionCandidate(p.id, p.text, bbNumber(p.text), p.createdAt))
                 }
                 onProgress(pages, scanned)
                 token = page.nextToken ?: break
