@@ -12,6 +12,10 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Button
+import androidx.compose.ui.Alignment
+import androidx.compose.foundation.layout.height
+import androidx.compose.material3.Surface
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -66,6 +70,7 @@ private fun LanBufferScreen() {
     var host by remember { mutableStateOf(MediaMtxConfig.host(context)) }
     var hostDraft by remember { mutableStateOf(host) }
     var isExporting by remember { mutableStateOf(false) }
+    var showConnection by remember { mutableStateOf(false) }
     var statusMessage by remember { mutableStateOf<String?>(null) }
     // The slow part of an export (PC cut + download + trim) starts as soon as the preview opens, so by the
     // time Export is tapped it is usually done. Keyed by the marked range; dropped if the preview is left.
@@ -131,21 +136,38 @@ private fun LanBufferScreen() {
             modifier = Modifier.fillMaxWidth().padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedTextField(
-                    value = hostDraft,
-                    onValueChange = { hostDraft = it },
-                    label = { Text("PC address") },
-                    singleLine = true,
-                    modifier = Modifier.weight(1f),
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                Text(
+                    "PC  $host",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = if (state.hasContent) Color(0xFF5BD6A2) else Color(0xFFFF9A9A),
                 )
-                OutlinedButton(
-                    onClick = {
-                        MediaMtxConfig.setHost(context, hostDraft)
-                        host = hostDraft.trim()
-                    },
-                    enabled = hostDraft.trim() != host,
-                ) { Text("Connect") }
+                TextButton(onClick = { showConnection = !showConnection }) {
+                    Text(if (showConnection) "Hide" else "Change", color = Color(0xFF9AA4B2))
+                }
+            }
+            if (showConnection) {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    OutlinedTextField(
+                        value = hostDraft,
+                        onValueChange = { hostDraft = it },
+                        label = { Text("PC address") },
+                        singleLine = true,
+                        modifier = Modifier.weight(1f),
+                    )
+                    FilledTonalButton(
+                        onClick = {
+                            MediaMtxConfig.setHost(context, hostDraft)
+                            host = hostDraft.trim()
+                            showConnection = false
+                        },
+                        enabled = hostDraft.trim() != host,
+                    ) { Text("Connect") }
+                }
             }
 
             TimelineScrubber(
@@ -160,17 +182,31 @@ private fun LanBufferScreen() {
                 modifier = Modifier.padding(horizontal = 20.dp),
             )
 
-            Text(
-                (
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                Text(
                     when {
-                        !state.hasSelection -> "Mark IN to start a selection"
-                        !state.outMarked -> "Selected: ${state.selectedDurationMs / 1000}s (growing - mark OUT)"
-                        else -> "Selected: ${state.selectedDurationMs / 1000}s"
+                        !state.hasSelection -> "Set IN to start a clip"
+                        !state.outMarked -> "${state.selectedDurationMs / 1000}s so far - set OUT"
+                        else -> "Clip: ${state.selectedDurationMs / 1000}s"
+                    },
+                    color = Color.White,
+                    style = MaterialTheme.typography.titleSmall,
+                )
+                if (state.isLive) {
+                    Surface(color = Color(0xFFD64545), shape = MaterialTheme.shapes.extraSmall) {
+                        Text(
+                            "LIVE",
+                            color = Color.White,
+                            style = MaterialTheme.typography.labelMedium,
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+                        )
                     }
-                ) + if (state.isLive) "  -  LIVE" else "",
-                color = Color.White,
-                style = MaterialTheme.typography.bodySmall,
-            )
+                }
+            }
 
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -178,17 +214,17 @@ private fun LanBufferScreen() {
             ) {
                 Row {
                     TextButton(onClick = { controller.stepFrame(forward = false) }, enabled = state.hasContent) {
-                        Text("|<", color = Color.White)
+                        Text("< frame", color = Color.White)
                     }
                     TextButton(onClick = { controller.togglePlayPause() }, enabled = state.hasContent) {
                         Text(if (state.isPlaying) "Pause" else "Play", color = Color.White)
                     }
                     TextButton(onClick = { controller.stepFrame(forward = true) }, enabled = state.hasContent) {
-                        Text(">|", color = Color.White)
+                        Text("frame >", color = Color.White)
                     }
                 }
-                OutlinedButton(onClick = { controller.jumpToLive() }, enabled = state.hasContent && !state.isLive) {
-                    Text("Jump to live")
+                FilledTonalButton(onClick = { controller.jumpToLive() }, enabled = state.hasContent && !state.isLive) {
+                    Text("Go live")
                 }
             }
 
@@ -197,7 +233,7 @@ private fun LanBufferScreen() {
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    OutlinedButton(onClick = { controller.exitPreview() }) { Text("Cancel") }
+                    OutlinedButton(onClick = { controller.exitPreview() }, modifier = Modifier.height(52.dp)) { Text("Cancel") }
                     Button(
                         onClick = {
                             val range = controller.inOutEpochRange() ?: return@Button
@@ -223,7 +259,7 @@ private fun LanBufferScreen() {
                             }
                         },
                         enabled = !isExporting,
-                        modifier = Modifier.weight(1f),
+                        modifier = Modifier.weight(1f).height(52.dp),
                     ) {
                         if (isExporting) CircularProgressIndicator(modifier = Modifier.padding(end = 8.dp))
                         Text("Export clip")
@@ -234,28 +270,28 @@ private fun LanBufferScreen() {
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    OutlinedButton(
+                    FilledTonalButton(
                         onClick = {
                             controller.setInAtPlayhead()
                             statusMessage = "IN marked"
                         },
                         enabled = state.hasContent,
-                        modifier = Modifier.weight(1f),
-                    ) { Text("Set IN") }
-                    OutlinedButton(
+                        modifier = Modifier.weight(1f).height(52.dp),
+                    ) { Text("Set IN", style = MaterialTheme.typography.labelLarge) }
+                    FilledTonalButton(
                         onClick = {
                             controller.setOutAtPlayhead()
                             statusMessage = "OUT marked"
                         },
                         enabled = state.hasContent && state.hasSelection,
-                        modifier = Modifier.weight(1f),
-                    ) { Text("Set OUT") }
+                        modifier = Modifier.weight(1f).height(52.dp),
+                    ) { Text("Set OUT", style = MaterialTheme.typography.labelLarge) }
                 }
                 Button(
                     onClick = { controller.enterPreview() },
                     enabled = state.hasContent && state.outMarked && state.selectedDurationMs > 0,
-                    modifier = Modifier.fillMaxWidth(),
-                ) { Text("Preview") }
+                    modifier = Modifier.fillMaxWidth().height(52.dp),
+                ) { Text("Preview", style = MaterialTheme.typography.labelLarge) }
             }
 
             statusMessage?.let { Text(it, color = Color.White, style = MaterialTheme.typography.bodySmall) }

@@ -46,6 +46,9 @@ import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import com.clipcut.domain.deletion.DeletionPreset
+import com.clipcut.ui.components.Screen
+import com.clipcut.ui.components.SectionCard
+import com.clipcut.ui.components.WarningCard
 import com.clipcut.domain.deletion.DeletionService
 import com.clipcut.domain.deletion.RunResult
 import com.clipcut.domain.deletion.RunStop
@@ -75,11 +78,11 @@ fun DeletionScreen(
         onDispose { view.keepScreenOn = false }
     }
 
-    Column(
-        modifier = modifier.fillMaxSize().padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
+    Screen(
+        title = "Trigger Deletion",
+        subtitle = "Delete BB LOGS posts from @${DeletionService.EXPECTED_HANDLE}",
+        modifier = modifier,
     ) {
-        Text("Trigger Deletion", style = MaterialTheme.typography.titleLarge)
         when (state.phase) {
             DeletionPhase.PICK -> PickStep(state, viewModel, onOpenHistory, onExit)
             DeletionPhase.FINDING -> FindingStep(state, viewModel)
@@ -100,34 +103,30 @@ private fun PickStep(state: DeletionUiState, vm: DeletionViewModel, onOpenHistor
         modifier = Modifier.verticalScroll(rememberScrollState()),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        Surface(color = MaterialTheme.colorScheme.errorContainer, modifier = Modifier.fillMaxWidth()) {
-            Text(
-                "Only @${DeletionService.EXPECTED_HANDLE}'s own posts that read exactly \"BB LOGS - NNN\" can be deleted here. " +
-                    "Your main account is never touched. Nothing is deleted until you review the list and confirm.",
-                modifier = Modifier.padding(12.dp),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onErrorContainer,
-            )
-        }
+        WarningCard(
+            "Only @${DeletionService.EXPECTED_HANDLE}'s own posts that read exactly \"BB LOGS - NNN\" can be deleted here. " +
+                "Your main account is never touched. Nothing is deleted until you review the list and confirm.",
+        )
 
-        Text("Time period", style = MaterialTheme.typography.labelMedium)
-        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            DeletionPreset.entries.forEach { preset ->
-                FilterChip(
-                    selected = state.preset == preset,
-                    onClick = {
-                        vm.selectPreset(preset)
-                        if (preset == DeletionPreset.CUSTOM) pickerOpen = true
-                    },
-                    label = { Text(preset.label) },
-                )
+        SectionCard("Time period") {
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                DeletionPreset.entries.forEach { preset ->
+                    FilterChip(
+                        selected = state.preset == preset,
+                        onClick = {
+                            vm.selectPreset(preset)
+                            if (preset == DeletionPreset.CUSTOM) pickerOpen = true
+                        },
+                        label = { Text(preset.label) },
+                    )
+                }
             }
-        }
-        if (state.preset == DeletionPreset.CUSTOM) {
-            OutlinedButton(onClick = { pickerOpen = true }, modifier = Modifier.fillMaxWidth()) {
-                val from = state.customFrom
-                val to = state.customTo
-                Text(if (from != null && to != null) "$from  to  $to  (whole days)" else "Choose dates")
+            if (state.preset == DeletionPreset.CUSTOM) {
+                OutlinedButton(onClick = { pickerOpen = true }, modifier = Modifier.fillMaxWidth()) {
+                    val from = state.customFrom
+                    val to = state.customTo
+                    Text(if (from != null && to != null) "$from  to  $to  (whole days)" else "Choose dates")
+                }
             }
         }
 

@@ -38,6 +38,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.height
+import com.clipcut.ui.components.Screen
+import com.clipcut.ui.components.SectionCard
+import com.clipcut.ui.components.StatusRow
+import com.clipcut.ui.components.Tone
 import com.clipcut.domain.api.CaptionFormat
 import com.clipcut.domain.api.CaptionMood
 import com.clipcut.domain.api.MediaRef
@@ -52,39 +58,40 @@ fun CaptionScreen(
     var newTemplateTitle by remember { mutableStateOf("") }
     var showSaveTemplate by remember { mutableStateOf(false) }
 
-    Column(
-        modifier = modifier.fillMaxSize().imePadding().verticalScroll(rememberScrollState()).padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
+    Screen(
+        title = "Caption",
+        subtitle = "Write, enhance and copy the post for your main account.",
+        modifier = modifier.imePadding(),
     ) {
-        Text("Caption", style = MaterialTheme.typography.titleLarge)
-
-        // Auto-embedded media from the media account's latest post (Phase 5's getLatestPost()).
-        Surface(color = MaterialTheme.colorScheme.surfaceVariant, modifier = Modifier.fillMaxWidth()) {
-            Column(modifier = Modifier.padding(12.dp)) {
-                if (state.isUploading) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        CircularProgressIndicator(modifier = Modifier.padding(end = 8.dp))
-                        Text("Uploading clip...")
-                    }
-                } else if (state.mediaRef != null) {
-                    Text("Uploaded: ${state.mediaRef?.url}", style = MaterialTheme.typography.bodySmall)
+      Column(
+        modifier = Modifier.verticalScroll(rememberScrollState()).padding(bottom = 24.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp),
+      ) {
+        SectionCard("Media post") {
+            if (state.isUploading) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+                    Text("Uploading clip...", modifier = Modifier.padding(start = 12.dp))
                 }
-                if (!state.isUploading && state.mediaRef == null) {
-                    OutlinedButton(onClick = viewModel::retryUpload) {
-                        Text(if (state.uploadOutcomeUnknown) "Upload anyway (may duplicate)" else "Retry upload")
-                    }
-                }
-                state.embeddedPost?.let { post ->
-                    Text(
-                        text = "Embedding latest media-account post: ${post.mediaRef.url}",
-                        style = MaterialTheme.typography.bodySmall,
-                    )
+            } else if (state.mediaRef != null) {
+                StatusRow("Posted", Tone.Good)
+                Text(
+                    state.mediaRef?.url.orEmpty(),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            } else {
+                StatusRow(
+                    if (state.uploadOutcomeUnknown) "Not confirmed - may already be posted" else "Not uploaded",
+                    Tone.Bad,
+                )
+                OutlinedButton(onClick = viewModel::retryUpload) {
+                    Text(if (state.uploadOutcomeUnknown) "Upload anyway (may duplicate)" else "Retry upload")
                 }
             }
         }
 
         val formatted = state.formatted
-        Text("Format", style = MaterialTheme.typography.labelMedium)
         @OptIn(ExperimentalLayoutApi::class)
         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             CaptionFormat.entries.forEach { format ->
@@ -204,10 +211,11 @@ fun CaptionScreen(
                 if (ref != null) onContinueToPost(state.caption, ref)
             },
             enabled = state.canProceedToPost,
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier.fillMaxWidth().height(52.dp),
         ) {
-            Text("Copy caption + link")
+            Text("Copy caption + link", style = MaterialTheme.typography.labelLarge)
         }
+      }
     }
 }
 

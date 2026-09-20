@@ -1,8 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
 
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <!-- The daily link goes out at a fixed time; an inexact alarm would drift by hours. -->
+    <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
+    <!-- Alarms are lost on reboot, so the schedule is re-armed after one. -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
 
     <application
         android:name=".ClipCutApp"
@@ -31,6 +37,12 @@
             android:configChanges="orientation|screenSize|keyboardHidden"
             android:theme="@style/Theme.ClipCut" />
 
+        <!-- Daily Link: schedule, groups and the send log. -->
+        <activity
+            android:name=".ui.broadcast.BroadcastActivity"
+            android:exported="false"
+            android:theme="@style/Theme.ClipCut" />
+
         <!-- Trigger Deletion: find, review, confirm, then paced deletion of BB LOGS posts. -->
         <activity
             android:name=".ui.deletion.DeletionActivity"
@@ -43,6 +55,31 @@
             android:name=".lan.CaptionPostActivity"
             android:exported="false"
             android:theme="@style/Theme.ClipCut" />
+
+        <!-- Daily link broadcast: the alarm wakes us, a Worker does the sending. -->
+        <receiver
+            android:name=".domain.broadcast.BroadcastAlarmReceiver"
+            android:exported="false" />
+        <receiver
+            android:name=".domain.broadcast.BroadcastBootReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
+        </receiver>
+
+        <!-- WorkManager is started by ClipCutApp instead, so Hilt can inject into the worker. -->
+        <provider
+            android:name="androidx.startup.InitializationProvider"
+            android:authorities="${applicationId}.androidx-startup"
+            android:exported="false"
+            tools:node="merge">
+            <meta-data
+                android:name="androidx.work.WorkManagerInitializer"
+                android:value="androidx.startup"
+                tools:node="remove" />
+        </provider>
     </application>
 
 </manifest>
