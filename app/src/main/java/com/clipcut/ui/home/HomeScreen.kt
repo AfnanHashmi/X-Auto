@@ -31,33 +31,15 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.clipcut.data.x.BbLogsCounter
-import com.clipcut.domain.broadcast.BroadcastScheduler
-import com.clipcut.domain.broadcast.BroadcastSettings
 import com.clipcut.lan.LanBufferActivity
-import com.clipcut.ui.broadcast.BroadcastActivity
 import com.clipcut.ui.components.Screen
 import com.clipcut.ui.deletion.DeletionActivity
 import dagger.hilt.android.lifecycle.HiltViewModel
-import java.time.format.DateTimeFormatter
 import javax.inject.Inject
 
 @HiltViewModel
-class HomeViewModel @Inject constructor(
-    private val counter: BbLogsCounter,
-    private val broadcast: BroadcastSettings,
-    private val scheduler: BroadcastScheduler,
-) : ViewModel() {
+class HomeViewModel @Inject constructor(private val counter: BbLogsCounter) : ViewModel() {
     fun nextCaption(): String = counter.nextCaption()
-
-    fun broadcastStatus(): String = if (broadcast.enabled) {
-        "Next send " + NEXT.format(scheduler.nextRunAt())
-    } else {
-        "Off"
-    }
-
-    private companion object {
-        val NEXT: DateTimeFormatter = DateTimeFormatter.ofPattern("EEE HH:mm")
-    }
 }
 
 @Composable
@@ -65,13 +47,11 @@ fun HomeScreen(modifier: Modifier = Modifier, viewModel: HomeViewModel = hiltVie
     val context = LocalContext.current
     // Re-read on every return to this screen: posting a clip or changing the schedule happens elsewhere.
     var caption by remember { mutableStateOf(viewModel.nextCaption()) }
-    var broadcast by remember { mutableStateOf(viewModel.broadcastStatus()) }
     val lifecycleOwner = LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_START) {
                 caption = viewModel.nextCaption()
-                broadcast = viewModel.broadcastStatus()
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
@@ -87,12 +67,6 @@ fun HomeScreen(modifier: Modifier = Modifier, viewModel: HomeViewModel = hiltVie
                 onClick = { context.startActivity(Intent(context, LanBufferActivity::class.java)) },
             )
             FeatureCard(
-                title = "Daily Link",
-                body = "Send today's viewing link to your X and Telegram groups every morning.",
-                status = broadcast,
-                onClick = { BroadcastActivity.start(context) },
-            )
-            FeatureCard(
                 title = "Trigger Deletion",
                 body = "Review and delete the media account's posts from a chosen time period.",
                 status = "Media account only",
@@ -100,7 +74,7 @@ fun HomeScreen(modifier: Modifier = Modifier, viewModel: HomeViewModel = hiltVie
             )
         }
         Text(
-            "Personal tool. Nothing posts without you asking, except the daily link when it is switched on.",
+            "Personal tool. Nothing is posted or deleted without you asking.",
             modifier = Modifier.fillMaxWidth().padding(top = 20.dp),
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,

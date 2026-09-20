@@ -5,8 +5,6 @@ import androidx.room.Room
 import com.clipcut.data.db.AppDatabase
 import com.clipcut.data.db.CaptionTemplateDao
 import com.clipcut.data.db.ClipRecordDao
-import com.clipcut.data.db.BroadcastLogDao
-import com.clipcut.data.db.BroadcastTargetDao
 import com.clipcut.data.db.DeletedPostDao
 import com.clipcut.data.db.UndoEntryDao
 import dagger.Module
@@ -23,7 +21,7 @@ object DatabaseModule {
     @Singleton
     fun provideAppDatabase(@ApplicationContext context: Context): AppDatabase =
         Room.databaseBuilder(context, AppDatabase::class.java, "clipcut.db")
-            .addMigrations(AppDatabase.MIGRATION_1_2, AppDatabase.MIGRATION_2_3, AppDatabase.MIGRATION_3_4, AppDatabase.MIGRATION_4_5, AppDatabase.MIGRATION_5_6)
+            .addMigrations(AppDatabase.MIGRATION_1_2, AppDatabase.MIGRATION_2_3, AppDatabase.MIGRATION_3_4, AppDatabase.MIGRATION_4_5, AppDatabase.MIGRATION_5_6, AppDatabase.MIGRATION_6_7)
             .build()
 
     @Provides
@@ -37,10 +35,4 @@ object DatabaseModule {
 
     @Provides
     fun provideDeletedPostDao(db: AppDatabase): DeletedPostDao = db.deletedPostDao()
-
-    @Provides
-    fun provideBroadcastTargetDao(db: AppDatabase): BroadcastTargetDao = db.broadcastTargetDao()
-
-    @Provides
-    fun provideBroadcastLogDao(db: AppDatabase): BroadcastLogDao = db.broadcastLogDao()
 }

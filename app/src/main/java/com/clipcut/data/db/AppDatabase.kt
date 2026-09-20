@@ -6,11 +6,8 @@ import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 
 @Database(
-    entities = [
-        CaptionTemplate::class, UndoEntry::class, ClipRecord::class, DeletedPost::class,
-        BroadcastTarget::class, BroadcastLogEntry::class,
-    ],
-    version = 6,
+    entities = [CaptionTemplate::class, UndoEntry::class, ClipRecord::class, DeletedPost::class],
+    version = 7,
     exportSchema = true,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -18,8 +15,6 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun undoEntryDao(): UndoEntryDao
     abstract fun clipRecordDao(): ClipRecordDao
     abstract fun deletedPostDao(): DeletedPostDao
-    abstract fun broadcastTargetDao(): BroadcastTargetDao
-    abstract fun broadcastLogDao(): BroadcastLogDao
 
     companion object {
         /** Adds `mediaRefUrl`, so a restored Caption screen can restore its media reference in full. */
@@ -67,6 +62,14 @@ abstract class AppDatabase : RoomDatabase() {
                         "`outcome` TEXT NOT NULL, `detail` TEXT NOT NULL, `link` TEXT NOT NULL, " +
                         "`manual` INTEGER NOT NULL)",
                 )
+            }
+        }
+
+        /** Removes the Daily Link feature's tables (v6 phones have them, empty or not). */
+        val MIGRATION_6_7 = object : Migration(6, 7) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("DROP TABLE IF EXISTS `broadcast_targets`")
+                db.execSQL("DROP TABLE IF EXISTS `broadcast_log`")
             }
         }
     }

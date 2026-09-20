@@ -41,8 +41,6 @@ android {
             "X_MAIN_CONSUMER_KEY", "X_MAIN_CONSUMER_SECRET",
             "X_MAIN_ACCESS_TOKEN", "X_MAIN_ACCESS_SECRET",
             "OPENAI_API_KEY",
-            "TELEGRAM_BOT_TOKEN",
-            "STREAM_URL", "STREAM_ADMIN_KEY",
         )) {
             buildConfigField("String", key, "\"${localProperties.getProperty(key, "")}\"")
         }
@@ -100,9 +98,6 @@ dependencies {
     implementation(libs.hilt.android)
     ksp(libs.hilt.android.compiler)
     implementation(libs.androidx.hilt.navigation.compose)
-    implementation(libs.androidx.work.runtime)
-    implementation(libs.androidx.hilt.work)
-    ksp(libs.androidx.hilt.compiler)
 
     implementation(libs.androidx.room.runtime)
     implementation(libs.androidx.room.ktx)

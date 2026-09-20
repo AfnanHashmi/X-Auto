@@ -262,27 +262,6 @@ class XApiClient(
     }
 
     /**
-     * Sends a text message into an existing DM conversation (group or one-to-one).
-     *
-     * OAuth 1.0a user context is accepted here, but ONLY if the X app's permission is set to
-     * "Read and write and Direct message" -- with anything less X answers 403
-     * `oauth1-permissions`, and the access token has to be regenerated after changing it.
-     * The conversation must already exist; this never starts a new one.
-     */
-    suspend fun sendDirectMessage(conversationId: String, text: String): String = withContext(Dispatchers.IO) {
-        require(conversationId.isNotEmpty() && conversationId.all { it.isDigit() || it == '-' }) {
-            "Not a DM conversation id: $conversationId"
-        }
-        val url = "$API_BASE/dm_conversations/$conversationId/messages"
-        val request = Request.Builder().url(url)
-            .header("Authorization", signer.authorizationHeader("POST", url))
-            .header("Content-Type", "application/json")
-            .post(JSONObject().put("text", text).toString().toRequestBody("application/json".toMediaType()))
-            .build()
-        JSONObject(execute(request)).getJSONObject("data").getString("dm_event_id")
-    }
-
-    /**
      * Whether a post is still on X. Read-only, and the answer to "did that timed-out DELETE land?".
      * v2 reports a missing post as HTTP 200 with an `errors` array and no `data`, not as a 404.
      */
