@@ -13,4 +13,7 @@ object MainPostText {
         val budget = (X_POST_CHAR_LIMIT - url.length - 1).coerceAtLeast(0)
         return "${caption.take(budget).trimEnd()}\n$url"
     }
+
+    /** Just the caption, for the standalone generator: same deliberate 280 cap, no link. */
+    fun captionOnly(caption: String): String = caption.take(X_POST_CHAR_LIMIT).trimEnd()
 }

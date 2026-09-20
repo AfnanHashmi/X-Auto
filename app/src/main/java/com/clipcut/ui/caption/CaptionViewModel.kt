@@ -47,7 +47,12 @@ class CaptionViewModel @Inject constructor(
     // when the run is committed (focus lost, or another mutating action interrupts it).
     private var pendingEditBaseline: String? = null
 
-    private val _uiState = MutableStateFlow(CaptionUiState(clipPath = clipPath))
+    /** The generator has no clip: nothing is uploaded and the media account is never touched. */
+    private val standalone = clipPath == STANDALONE_PATH
+
+    private val _uiState = MutableStateFlow(
+        CaptionUiState(clipPath = clipPath, standalone = standalone, isUploading = !standalone),
+    )
     val uiState: StateFlow<CaptionUiState> = _uiState.asStateFlow()
 
     init {
@@ -56,8 +61,10 @@ class CaptionViewModel @Inject constructor(
                 _uiState.update { it.copy(templates = templates) }
             }
         }
-        uploadClip()
-        loadLatestPost()
+        if (!standalone) {
+            uploadClip()
+            loadLatestPost()
+        }
     }
 
     // In-memory guard against a double tap on the retry button while a request is in flight.
@@ -260,5 +267,10 @@ class CaptionViewModel @Inject constructor(
             }
             _uiState.update { it.copy(canUndo = undoEntryDao.peekLatest(sessionId) != null) }
         }
+    }
+
+    companion object {
+        /** Stands in for the clip path when the screen is opened on its own. */
+        const val STANDALONE_PATH = "standalone"
     }
 }

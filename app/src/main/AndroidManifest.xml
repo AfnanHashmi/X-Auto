@@ -31,6 +31,12 @@
             android:configChanges="orientation|screenSize|keyboardHidden"
             android:theme="@style/Theme.ClipCut" />
 
+        <!-- Caption Generator: the caption screen on its own; copies just the caption. -->
+        <activity
+            android:name=".ui.caption.CaptionGeneratorActivity"
+            android:exported="false"
+            android:theme="@style/Theme.ClipCut" />
+
         <!-- Trigger Deletion: find, review, confirm, then paced deletion of the media account's posts. -->
         <activity
             android:name=".ui.deletion.DeletionActivity"

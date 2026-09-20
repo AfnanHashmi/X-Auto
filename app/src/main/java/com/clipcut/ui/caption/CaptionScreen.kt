@@ -53,21 +53,23 @@ fun CaptionScreen(
     modifier: Modifier = Modifier,
     viewModel: CaptionViewModel = hiltViewModel(),
     onContinueToPost: (caption: String, mediaRef: MediaRef) -> Unit = { _, _ -> },
+    onCopyCaption: (caption: String) -> Unit = {},
 ) {
+    var copiedCaption by remember { mutableStateOf<String?>(null) }
     val state by viewModel.uiState.collectAsState()
     var newTemplateTitle by remember { mutableStateOf("") }
     var showSaveTemplate by remember { mutableStateOf(false) }
 
     Screen(
         title = "Caption",
-        subtitle = "Write, enhance and copy the post for your main account.",
+        subtitle = if (state.standalone) "Write and enhance a caption, then copy it." else "Write, enhance and copy the post for your main account.",
         modifier = modifier.imePadding(),
     ) {
       Column(
         modifier = Modifier.verticalScroll(rememberScrollState()).padding(bottom = 24.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp),
       ) {
-        SectionCard("Media post") {
+        if (!state.standalone) SectionCard("Media post") {
             if (state.isUploading) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
@@ -207,13 +209,28 @@ fun CaptionScreen(
 
         Button(
             onClick = {
-                val ref = state.mediaRef
-                if (ref != null) onContinueToPost(state.caption, ref)
+                if (state.standalone) {
+                    onCopyCaption(state.caption)
+                    copiedCaption = state.caption
+                } else {
+                    val ref = state.mediaRef
+                    if (ref != null) onContinueToPost(state.caption, ref)
+                }
             },
             enabled = state.canProceedToPost,
             modifier = Modifier.fillMaxWidth().height(52.dp),
         ) {
-            Text("Copy caption + link", style = MaterialTheme.typography.labelLarge)
+            Text(
+                if (state.standalone) "Copy caption" else "Copy caption + link",
+                style = MaterialTheme.typography.labelLarge,
+            )
+        }
+        if (state.standalone && copiedCaption != null) {
+            Text(
+                if (copiedCaption == state.caption) "Copied to clipboard" else "Copied earlier - edited since, copy again",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.secondary,
+            )
         }
       }
     }

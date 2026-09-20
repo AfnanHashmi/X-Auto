@@ -32,6 +32,13 @@ class MainPostTextTest {
     }
 
     @Test
+    fun captionOnlyHasNoLinkAndKeepsTheSameCap() {
+        assertEquals("kya scene hai 🔥", MainPostText.captionOnly("kya scene hai 🔥"))
+        assertEquals(280, MainPostText.captionOnly("a".repeat(1000)).length)
+        assertEquals("trim me", MainPostText.captionOnly("trim me   "))
+    }
+
+    @Test
     fun hindiEnglishCaptionIsPreserved() {
         assertEquals("kya scene hai 🔥\n$url", MainPostText.build("kya scene hai 🔥", url))
     }

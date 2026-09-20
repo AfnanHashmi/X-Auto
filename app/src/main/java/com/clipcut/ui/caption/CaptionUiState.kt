@@ -21,9 +21,11 @@ data class CaptionUiState(
     val mood: CaptionMood = CaptionMood.Default,
     /** The media post may already exist on X; uploading again needs an explicit, informed tap. */
     val uploadOutcomeUnknown: Boolean = false,
+    /** The generator opened without a clip: nothing to upload, and only the caption is copied. */
+    val standalone: Boolean = false,
 ) {
     /** Ready to post once the clip has uploaded (so there's a [MediaRef] to attach) and there's text. */
-    val canProceedToPost: Boolean get() = mediaRef != null && hasContent
+    val canProceedToPost: Boolean get() = hasContent && (standalone || mediaRef != null)
 
     /** [caption] split into layout label / heading / body. Derived, so undo and templates just work. */
     val formatted: FormattedCaption get() = CaptionFormatText.parse(caption)

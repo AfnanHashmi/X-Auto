@@ -32,6 +32,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.clipcut.data.x.BbLogsCounter
 import com.clipcut.lan.LanBufferActivity
+import com.clipcut.ui.caption.CaptionGeneratorActivity
 import com.clipcut.ui.components.Screen
 import com.clipcut.ui.deletion.DeletionActivity
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -65,6 +66,12 @@ fun HomeScreen(modifier: Modifier = Modifier, viewModel: HomeViewModel = hiltVie
                 body = "Watch the live feed, mark in and out, export and post.",
                 status = "Next post $caption",
                 onClick = { context.startActivity(Intent(context, LanBufferActivity::class.java)) },
+            )
+            FeatureCard(
+                title = "Caption Generator",
+                body = "Write and enhance a caption with moods and hashtags, then copy it.",
+                status = "No clip needed",
+                onClick = { CaptionGeneratorActivity.start(context) },
             )
             FeatureCard(
                 title = "Trigger Deletion",
