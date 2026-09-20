@@ -69,6 +69,7 @@ class LanBufferActivity : ComponentActivity() {
 private fun LanBufferScreen() {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    var profile by remember { mutableStateOf(MediaMtxConfig.activeProfile(context)) }
     var host by remember { mutableStateOf(MediaMtxConfig.host(context)) }
     var hostDraft by remember { mutableStateOf(host) }
     var isExporting by remember { mutableStateOf(false) }
@@ -143,11 +144,34 @@ private fun LanBufferScreen() {
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween,
             ) {
-                Text(
-                    "PC  $host",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = if (state.hasContent) Color(0xFF5BD6A2) else Color(0xFFFF9A9A),
-                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    MediaMtxConfig.Profile.entries.forEach { p ->
+                        val selected = p == profile
+                        TextButton(
+                            onClick = {
+                                if (!selected) {
+                                    MediaMtxConfig.setActiveProfile(context, p)
+                                    profile = p
+                                    // Changing this re-keys the player, which reconnects to the new address.
+                                    host = MediaMtxConfig.hostOf(context, p)
+                                    hostDraft = host
+                                }
+                            },
+                        ) {
+                            Text(
+                                p.label,
+                                color = if (selected) Color.White else Color(0xFF6B7482),
+                                style = MaterialTheme.typography.labelLarge,
+                            )
+                        }
+                    }
+                    Text(
+                        host,
+                        style = MaterialTheme.typography.labelMedium,
+                        color = if (state.hasContent) Color(0xFF5BD6A2) else Color(0xFFFF9A9A),
+                        modifier = Modifier.padding(start = 4.dp),
+                    )
+                }
                 TextButton(onClick = { showConnection = !showConnection }) {
                     Text(if (showConnection) "Hide" else "Change", color = Color(0xFF9AA4B2))
                 }
@@ -157,7 +181,7 @@ private fun LanBufferScreen() {
                     OutlinedTextField(
                         value = hostDraft,
                         onValueChange = { hostDraft = it },
-                        label = { Text("PC address") },
+                        label = { Text("${profile.label} address") },
                         singleLine = true,
                         modifier = Modifier.weight(1f),
                     )
