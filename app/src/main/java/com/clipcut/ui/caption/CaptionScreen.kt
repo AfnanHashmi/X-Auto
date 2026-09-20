@@ -91,6 +91,13 @@ fun CaptionScreen(
                     Text(if (state.uploadOutcomeUnknown) "Upload anyway (may duplicate)" else "Retry upload")
                 }
             }
+            state.embeddedPost?.let { post ->
+                Text(
+                    "Latest on the media account: ${post.mediaRef.url}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
         }
 
         val formatted = state.formatted

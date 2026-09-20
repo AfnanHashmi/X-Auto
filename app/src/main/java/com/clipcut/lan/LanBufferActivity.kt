@@ -42,6 +42,7 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.media3.ui.PlayerView
 import com.clipcut.data.stream.lan.MediaMtxConfig
 import com.clipcut.ui.cut.TimelineScrubber
+import com.clipcut.ui.theme.ClipCutTheme
 import kotlinx.coroutines.async
 import kotlinx.coroutines.launch
 
@@ -54,7 +55,8 @@ import kotlinx.coroutines.launch
 class LanBufferActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContent { LanBufferScreen() }
+        // Themed like the rest of the app; the screen still paints its own black background.
+        setContent { ClipCutTheme { LanBufferScreen() } }
     }
 
     override fun onDestroy() {
