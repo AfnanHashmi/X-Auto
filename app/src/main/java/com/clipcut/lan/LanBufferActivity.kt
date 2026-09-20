@@ -239,14 +239,14 @@ private fun LanBufferScreen() {
                 horizontalArrangement = Arrangement.SpaceBetween,
             ) {
                 Row {
-                    TextButton(onClick = { controller.stepFrame(forward = false) }, enabled = state.hasContent) {
-                        Text("< frame", color = Color.White)
+                    TextButton(onClick = { controller.skip(forward = false) }, enabled = state.hasContent) {
+                        Text("< 1s", color = Color.White)
                     }
                     TextButton(onClick = { controller.togglePlayPause() }, enabled = state.hasContent) {
                         Text(if (state.isPlaying) "Pause" else "Play", color = Color.White)
                     }
-                    TextButton(onClick = { controller.stepFrame(forward = true) }, enabled = state.hasContent) {
-                        Text("frame >", color = Color.White)
+                    TextButton(onClick = { controller.skip(forward = true) }, enabled = state.hasContent) {
+                        Text("1s >", color = Color.White)
                     }
                 }
                 FilledTonalButton(onClick = { controller.jumpToLive() }, enabled = state.hasContent && !state.isLive) {

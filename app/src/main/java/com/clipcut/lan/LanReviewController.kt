@@ -16,7 +16,7 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
 private const val POSITION_POLL_MS = 200L
-private const val FRAME_STEP_MS = 33L // fallback (~30fps) when Format.frameRate isn't reported yet.
+private const val SKIP_STEP_MS = 1_000L // how far the back / forward buttons move the playhead.
 private const val MIN_CLIP_SPAN_MS = 1_000L
 // Clock-free live model. HLS live offset from ExoPlayer depends on the phone clock matching the PC's
 // (it does not), so "how far behind live" is measured as window end minus position instead. The
@@ -133,11 +133,14 @@ class LanReviewController(val player: ExoPlayer) {
         player.playWhenReady = true
     }
 
-    fun stepFrame(forward: Boolean) {
+    /**
+     * Moves the playhead one second back or forward and holds it there, like the frame step it
+     * replaced: the buttons are for positioning a mark, so playback stops rather than running on.
+     * [seekTo] clamps to the window, so this cannot leave the recorded range.
+     */
+    fun skip(forward: Boolean) {
         player.playWhenReady = false
-        val frameRate = player.videoFormat?.frameRate?.takeIf { it > 0f && it.isFinite() }
-        val stepMs = frameRate?.let { (1000.0 / it).toLong().coerceAtLeast(1L) } ?: FRAME_STEP_MS
-        seekTo(player.currentPosition + if (forward) stepMs else -stepMs)
+        seekTo(player.currentPosition + if (forward) SKIP_STEP_MS else -SKIP_STEP_MS)
     }
 
     private fun epochAt(timelineMs: Long): Long? = windowOrNull()?.let { windowStartEpoch(it) + timelineMs }
