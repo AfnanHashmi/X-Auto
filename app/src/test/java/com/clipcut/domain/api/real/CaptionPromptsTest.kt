@@ -27,7 +27,7 @@ class CaptionPromptsTest {
     fun everyPromptHasTheMasterPromptAndItsOwnMoodBlock() {
         for (mood in CaptionMood.entries.filter { it != CaptionMood.AUTO }) {
             val p = buildPrompt(mood)
-            assertTrue("master prompt missing for ${mood.label}", p.startsWith("You are an expert X (Twitter) caption writer and editor"))
+            assertTrue("master prompt missing for ${mood.label}", p.startsWith("You are an expert X (Twitter) caption editor"))
             assertTrue(p.contains("Mood: ${mood.label}\n"))
             assertTrue(p.contains("Intensity:\n${mood.intensity}/10"))
             assertTrue(p.contains("Emoji level:\n${mood.emojiLevel}/3"))
@@ -53,13 +53,31 @@ class CaptionPromptsTest {
     @Test
     fun autoAsksTheModelToPickFromAllFifteenAndNotToSayWhich() {
         val p = buildPrompt(CaptionMood.AUTO)
-        assertTrue(p.startsWith("You are an expert X (Twitter) caption writer and editor"))
+        assertTrue(p.startsWith("You are an expert X (Twitter) caption editor"))
         assertTrue(p.contains("Mood: Auto"))
         for (mood in CaptionMood.entries.filter { it != CaptionMood.AUTO }) {
             assertTrue("Auto prompt should list ${mood.label}", p.contains("\n${mood.label}\n"))
         }
         assertTrue(p.contains("Do not tell the user which mood was selected."))
         assertFalse(p.contains("Intensity:"))
+    }
+
+    @Test
+    fun theHardLengthLimitIsStatedInEveryPrompt() {
+        // The app cuts the caption at 280 minus the media link, so an over-long reply is truncated
+        // mid-word before it is posted. The limit has to reach the model, not just the clipboard.
+        for (mood in listOf(CaptionMood.FIGHT, CaptionMood.AUTO)) {
+            assertTrue(buildPrompt(mood).contains("220 characters"))
+        }
+    }
+
+    @Test
+    fun templateModeOverridesTheBareCaptionOutputRule() {
+        // Without this the OUTPUT section ("return ONLY the caption") contradicts HEADING:/CAPTION:,
+        // and parseTemplateReply throws on the missing part, surfacing as "Enhance failed".
+        val t = buildPrompt(CaptionMood.FIGHT, templateMode = true)
+        assertTrue(t.contains("OVERRIDES the OUTPUT section"))
+        assertTrue(t.indexOf("TEMPLATE MODE") > t.indexOf("OUTPUT"))
     }
 
     @Test
