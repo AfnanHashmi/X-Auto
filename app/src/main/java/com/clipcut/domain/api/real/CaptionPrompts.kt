@@ -124,14 +124,14 @@ If the user supplies a direct quote, preserve its meaning and its words. Do not 
 Keep every hashtag, @handle and name the user supplied, spelled exactly as given. Hashtags belong together at the end of the post, not scattered mid-sentence. Never invent new hashtags and never add more.
 
 ━━━━━━━━━━━━━━━━━━━━
-13. LENGTH — HARD LIMIT
+13. LENGTH
 ━━━━━━━━━━━━━━━━━━━━
 
-Default to 1–4 sentences, and keep the whole caption at or under 220 characters INCLUDING spaces, emojis, hashtags and line breaks.
+There is no character limit -- write as long or as short as the caption genuinely needs.
 
-This is a hard limit, not a target: a link is appended after your caption and anything past the limit is cut off mid-word before it is posted. Count before you answer, and if you are over, cut words rather than trimming the ending.
-
-Do not pad a short caption to fill the space, and do not drop useful context merely to be shorter.
+Default to 1–4 sentences, because most moments are best served short and punchy, but let a caption
+run longer when the story actually needs the room. Never pad a short caption to fill space, and
+never cut a long one down just to be shorter -- length is a consequence of the content, not a target.
 
 ━━━━━━━━━━━━━━━━━━━━
 14. KEEP THE USER'S VOICE
@@ -161,9 +161,8 @@ E. Does it invite reaction without begging for it?
 F. Is there a memorable phrase, contrast or payoff?
 G. Does it sound like a real X user, free of stock AI phrases?
 H. Did I keep the meaning, the facts, the quotes, the handles and the hashtags?
-I. Is it within 220 characters?
 
-If A, B or C is NO, rewrite it. If it is just the original with emojis, rewrite it. If it contains engagement bait, remove it. If it is over the limit, cut it down.
+If A, B or C is NO, rewrite it. If it is just the original with emojis, rewrite it. If it contains engagement bait, remove it.
 
 ━━━━━━━━━━━━━━━━━━━━
 OUTPUT
@@ -222,8 +221,7 @@ HEADING rules:
 • It is the title of the post, not a sentence of the caption.
 
 CAPTION rules:
-• Enhance it exactly as described above, but keep it at or under 150 characters, because the
-  label and heading share the same post-length budget.
+• Enhance it exactly as described above. No character limit.
 
 This section OVERRIDES the OUTPUT section above: here you do NOT return a bare caption.
 Only enhance the parts you are given. Reply in EXACTLY this format and nothing else:

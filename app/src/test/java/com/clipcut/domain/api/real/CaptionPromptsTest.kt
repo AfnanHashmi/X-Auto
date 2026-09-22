@@ -63,12 +63,15 @@ class CaptionPromptsTest {
     }
 
     @Test
-    fun theHardLengthLimitIsStatedInEveryPrompt() {
-        // The app cuts the caption at 280 minus the media link, so an over-long reply is truncated
-        // mid-word before it is posted. The limit has to reach the model, not just the clipboard.
+    fun noCharacterLimitIsStatedAnywhere() {
+        // Premium accounts post well past 280 chars, and the app no longer truncates either
+        // (MainPostText.build/captionOnly), so the model must not be told to cut itself short.
         for (mood in listOf(CaptionMood.FIGHT, CaptionMood.AUTO)) {
-            assertTrue(buildPrompt(mood).contains("220 characters"))
+            val p = buildPrompt(mood)
+            assertTrue(p.contains("no character limit", ignoreCase = true))
+            assertFalse(p.contains("220"))
         }
+        assertFalse(buildPrompt(CaptionMood.FIGHT, templateMode = true).contains("150"))
     }
 
     @Test

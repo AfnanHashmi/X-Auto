@@ -18,23 +18,22 @@ class MainPostTextTest {
     }
 
     @Test
-    fun longCaptionIsTrimmedSoTheLinkIsNeverCut() {
-        val text = MainPostText.build("a".repeat(1000), url)
-        assertTrue(text.endsWith("\n$url"))
-        assertEquals(280, text.length)
+    fun longCaptionIsNotTruncated() {
+        // Premium accounts post well past 280 chars; the app no longer imposes its own cap.
+        val long = "a".repeat(1000)
+        val text = MainPostText.build(long, url)
+        assertEquals("$long\n$url", text)
     }
 
     @Test
-    fun trailingSpaceBeforeTheCutIsTrimmed() {
-        val budget = 280 - url.length - 1
-        val text = MainPostText.build("a".repeat(budget - 1) + " bbb", url)
-        assertEquals("a".repeat(budget - 1) + "\n$url", text)
+    fun trailingWhitespaceIsStillTrimmed() {
+        assertEquals("caption\n$url", MainPostText.build("caption   ", url))
     }
 
     @Test
-    fun captionOnlyHasNoLinkAndKeepsTheSameCap() {
+    fun captionOnlyHasNoLinkAndNoCap() {
         assertEquals("kya scene hai 🔥", MainPostText.captionOnly("kya scene hai 🔥"))
-        assertEquals(280, MainPostText.captionOnly("a".repeat(1000)).length)
+        assertEquals("a".repeat(1000), MainPostText.captionOnly("a".repeat(1000)))
         assertEquals("trim me", MainPostText.captionOnly("trim me   "))
     }
 
