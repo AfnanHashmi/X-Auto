@@ -211,9 +211,9 @@ private const val TEMPLATE_BLOCK = """━━━━━━━━━━━━━━
 TEMPLATE MODE
 ━━━━━━━━━━━━━━━━━━━━
 
-The user's input is a post with a HEADING and/or a CAPTION. The post also has a fixed label
-(for example "BB Episode Logs - ") that the app adds by itself. NEVER write, repeat, reword or
-mention that label.
+The user's input is a post with a HEADING and/or a CAPTION. Some posts also carry a fixed label
+(for example "BB 24Hrs Channel Logs - ") that the app adds by itself and never shows you.
+NEVER write, repeat, reword or mention such a label, and never invent one.
 
 HEADING rules:
 • A short headline: at most about 8 words, one line, no line breaks.

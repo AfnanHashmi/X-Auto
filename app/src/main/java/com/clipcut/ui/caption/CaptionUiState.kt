@@ -4,13 +4,19 @@ import com.clipcut.data.db.CaptionTemplate
 import com.clipcut.domain.api.CaptionFormat
 import com.clipcut.domain.api.CaptionFormatText
 import com.clipcut.domain.api.CaptionMood
-import com.clipcut.domain.api.FormattedCaption
+import com.clipcut.domain.api.CaptionSnapshot
 import com.clipcut.domain.api.MediaRef
 import com.clipcut.domain.api.Post
 
 data class CaptionUiState(
     val clipPath: String = "",
-    val caption: String = "",
+    /**
+     * The post is held as its three parts, not as one string. A plain post's heading cannot be told
+     * apart from its caption once they are joined, so [caption] is derived from these and never parsed.
+     */
+    val format: CaptionFormat = CaptionFormat.PLAIN,
+    val heading: String = "",
+    val body: String = "",
     val isUploading: Boolean = true,
     val mediaRef: MediaRef? = null,
     val embeddedPost: Post? = null,
@@ -24,17 +30,22 @@ data class CaptionUiState(
     /** The generator opened without a clip: nothing to upload, and only the caption is copied. */
     val standalone: Boolean = false,
 ) {
+    /** The exact text that is copied and posted: the layout's label, the heading, then the caption. */
+    val caption: String get() = CaptionFormatText.compose(format, heading, body)
+
+    /** What Undo restores. */
+    fun snapshot() = CaptionSnapshot(format, heading, body)
+
     /** Ready to post once the clip has uploaded (so there's a [MediaRef] to attach) and there's text. */
     val canProceedToPost: Boolean get() = hasContent && (standalone || mediaRef != null)
 
-    /** [caption] split into layout label / heading / body. Derived, so undo and templates just work. */
-    val formatted: FormattedCaption get() = CaptionFormatText.parse(caption)
-
-    /** A templated post needs both its heading and caption; a plain one just needs text. */
+    /**
+     * A labelled post needs both its heading and caption. A plain post needs any text at all: its
+     * heading is optional, so a plain caption on its own is still a complete post.
+     */
     val hasContent: Boolean
-        get() = formatted.let { if (it.format == CaptionFormat.PLAIN) caption.isNotBlank() else it.heading.isNotBlank() && it.body.isNotBlank() }
+        get() = if (format == CaptionFormat.PLAIN) heading.isNotBlank() || body.isNotBlank() else heading.isNotBlank() && body.isNotBlank()
 
-    /** Enhancing needs something to enhance: any text for plain, the heading or caption for templated. */
-    val canEnhance: Boolean
-        get() = !isEnhancing && formatted.let { if (it.format == CaptionFormat.PLAIN) caption.isNotBlank() else it.heading.isNotBlank() || it.body.isNotBlank() }
+    /** Enhancing needs something to enhance: the heading or the caption. */
+    val canEnhance: Boolean get() = !isEnhancing && (heading.isNotBlank() || body.isNotBlank())
 }

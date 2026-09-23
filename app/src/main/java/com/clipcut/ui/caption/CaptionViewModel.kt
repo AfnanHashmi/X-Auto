@@ -15,6 +15,7 @@ import com.clipcut.domain.api.CaptionEnhancer
 import com.clipcut.domain.api.CaptionFormat
 import com.clipcut.domain.api.CaptionFormatText
 import com.clipcut.domain.api.CaptionMood
+import com.clipcut.domain.api.CaptionSnapshot
 import com.clipcut.domain.api.MediaAccountApi
 import com.clipcut.domain.api.MediaRef
 import com.clipcut.domain.api.MediaUploader
@@ -43,9 +44,9 @@ class CaptionViewModel @Inject constructor(
     private val sessionId = UUID.randomUUID().toString()
 
     // Manual edits are coalesced into a single undo step per "typing run" rather than per
-    // keystroke: the pre-edit text is captured once (here) and pushed to the undo stack only
+    // keystroke: the pre-edit post is captured once (here) and pushed to the undo stack only
     // when the run is committed (focus lost, or another mutating action interrupts it).
-    private var pendingEditBaseline: String? = null
+    private var pendingEditBaseline: CaptionSnapshot? = null
 
     /** The generator has no clip: nothing is uploaded and the media account is never touched. */
     private val standalone = clipPath == STANDALONE_PATH
@@ -155,22 +156,34 @@ class CaptionViewModel @Inject constructor(
         }
     }
 
-    fun updateCaption(newText: String) {
-        if (pendingEditBaseline == null) pendingEditBaseline = _uiState.value.caption
-        _uiState.update { it.copy(caption = newText) }
+    /** Starts a typing run: remembers the post as it was, once, so the whole run undoes as one step. */
+    private fun beginEdit() {
+        if (pendingEditBaseline == null) pendingEditBaseline = _uiState.value.snapshot()
     }
 
-    /** Call when the caption field loses focus, committing the pending typing run as one undo step. */
+    fun updateBody(body: String) {
+        beginEdit()
+        _uiState.update { it.copy(body = body) }
+    }
+
+    fun updateHeading(heading: String) {
+        beginEdit()
+        _uiState.update { it.copy(heading = heading.replace("\n", " ")) }
+    }
+
+    /** Call when a field loses focus, committing the pending typing run as one undo step. */
     fun commitManualEdit() {
         val baseline = pendingEditBaseline ?: return
         pendingEditBaseline = null
-        if (baseline != _uiState.value.caption) pushUndo(baseline)
+        if (baseline != _uiState.value.snapshot()) pushUndo(baseline)
     }
 
+    /** Replaces the whole post with a saved one. A labelled template restores its layout, heading and caption. */
     fun applyTemplate(template: CaptionTemplate) {
         commitManualEdit()
-        pushUndo(_uiState.value.caption)
-        _uiState.update { it.copy(caption = template.body) }
+        pushUndo(_uiState.value.snapshot())
+        val p = CaptionFormatText.parse(template.body)
+        _uiState.update { it.copy(format = p.format, heading = p.heading, body = p.body) }
     }
 
     fun saveAsTemplate(title: String) {
@@ -191,55 +204,47 @@ class CaptionViewModel @Inject constructor(
         _uiState.update { it.copy(mood = mood) }
     }
 
-    /** Switches the post layout, keeping what was typed: plain text becomes the caption of a templated post. */
+    /** Switches the post layout. The heading and the caption are kept exactly as typed. */
     fun selectFormat(format: CaptionFormat) {
         commitManualEdit()
-        val before = _uiState.value.caption
-        val p = CaptionFormatText.parse(before)
-        if (p.format == format) return
-        pushUndo(before)
-        _uiState.update { it.copy(caption = CaptionFormatText.compose(format, p.heading, p.body)) }
+        if (_uiState.value.format == format) return
+        pushUndo(_uiState.value.snapshot())
+        _uiState.update { it.copy(format = format) }
     }
 
-    fun updateHeading(heading: String) {
-        val p = CaptionFormatText.parse(_uiState.value.caption)
-        updateCaption(CaptionFormatText.compose(p.format, heading.replace("\n", " "), p.body))
-    }
-
-    fun updateBody(body: String) {
-        val p = CaptionFormatText.parse(_uiState.value.caption)
-        updateCaption(CaptionFormatText.compose(p.format, p.heading, body))
-    }
-
-    /** Writes a hashtag at the end of the caption (of the Caption field in templated posts); a tag already there is not repeated. */
+    /** Writes a hashtag at the end of the caption; a tag already there is not repeated. */
     fun addHashtag(tag: String) {
         commitManualEdit()
-        val before = _uiState.value.caption
-        val p = CaptionFormatText.parse(before)
-        if (p.body.contains(tag, ignoreCase = true)) return
-        val body = if (p.body.isBlank()) tag else p.body.trimEnd() + " " + tag
+        val before = _uiState.value.snapshot()
+        if (before.body.contains(tag, ignoreCase = true)) return
+        val body = if (before.body.isBlank()) tag else before.body.trimEnd() + " " + tag
         pushUndo(before)
-        _uiState.update { it.copy(caption = CaptionFormatText.compose(p.format, p.heading, body)) }
+        _uiState.update { it.copy(body = body) }
     }
 
-    /** Plain posts enhance as one caption; templated ones enhance only heading + caption, never the label. */
-    private suspend fun runEnhance(before: String): Result<String> {
+    /**
+     * A post with no heading and no label is one caption and is enhanced as one. Anything with a heading or
+     * a fixed label is enhanced as heading + caption only, and the label (blank when there is none) is never
+     * sent to the model or taken back from it.
+     */
+    private suspend fun runEnhance(before: CaptionSnapshot): Result<Pair<String, String>> {
         val mood = _uiState.value.mood
-        val p = CaptionFormatText.parse(before)
-        val label = p.format.prefix ?: return captionEnhancer.enhance(before, mood)
-        return captionEnhancer.enhanceTemplate(p.heading, p.body, mood, label)
-            .map { (heading, body) -> CaptionFormatText.compose(p.format, heading, body) }
+        val label = before.format.prefix
+        if (label == null && before.heading.isBlank()) {
+            return captionEnhancer.enhance(before.body, mood).map { enhanced -> before.heading to enhanced }
+        }
+        return captionEnhancer.enhanceTemplate(before.heading, before.body, mood, label.orEmpty())
     }
 
     fun enhance() {
         commitManualEdit()
         viewModelScope.launch {
-            val before = _uiState.value.caption
+            val before = _uiState.value.snapshot()
             _uiState.update { it.copy(isEnhancing = true) }
             runEnhance(before).fold(
-                onSuccess = { enhanced ->
+                onSuccess = { (heading, body) ->
                     pushUndo(before)
-                    _uiState.update { it.copy(isEnhancing = false, caption = enhanced) }
+                    _uiState.update { it.copy(isEnhancing = false, heading = heading, body = body) }
                 },
                 onFailure = { e ->
                     _uiState.update { it.copy(isEnhancing = false, statusMessage = "Enhance failed: ${e.message}") }
@@ -248,10 +253,10 @@ class CaptionViewModel @Inject constructor(
         }
     }
 
-    private fun pushUndo(previousText: String) {
+    private fun pushUndo(previous: CaptionSnapshot) {
         viewModelScope.launch {
             undoEntryDao.push(
-                UndoEntry(sessionId = sessionId, previousText = previousText, createdAtEpochMs = System.currentTimeMillis()),
+                UndoEntry(sessionId = sessionId, previousText = previous.encode(), createdAtEpochMs = System.currentTimeMillis()),
             )
             _uiState.update { it.copy(canUndo = true) }
         }
@@ -262,8 +267,11 @@ class CaptionViewModel @Inject constructor(
         viewModelScope.launch {
             val entry = undoEntryDao.peekLatest(sessionId) ?: return@launch
             undoEntryDao.pop(entry.id)
+            // Entries are snapshots; anything that is not one is plain text from an older build.
+            val restored = CaptionSnapshot.decode(entry.previousText)
+                ?: CaptionFormatText.parse(entry.previousText).let { CaptionSnapshot(it.format, it.heading, it.body) }
             _uiState.update {
-                it.copy(caption = entry.previousText, canUndo = false)
+                it.copy(format = restored.format, heading = restored.heading, body = restored.body, canUndo = false)
             }
             _uiState.update { it.copy(canUndo = undoEntryDao.peekLatest(sessionId) != null) }
         }

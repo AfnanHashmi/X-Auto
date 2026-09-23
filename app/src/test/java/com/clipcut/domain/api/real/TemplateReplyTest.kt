@@ -6,7 +6,7 @@ import org.junit.Assert.assertThrows
 import org.junit.Test
 
 class TemplateReplyTest {
-    private val label = "BB Episode Logs - "
+    private val label = "BB 24Hrs Channel Logs - "
 
     @Test
     fun readsBothPartsIncludingAMultiLineCaption() {
@@ -24,7 +24,7 @@ class TemplateReplyTest {
 
     @Test
     fun aRepeatedLabelInTheHeadingIsStripped() {
-        val r = parseTemplateReply("HEADING: BB Episode Logs - Kitchen war\nCAPTION: x", true, true, label)
+        val r = parseTemplateReply("HEADING: BB 24Hrs Channel Logs - Kitchen war\nCAPTION: x", true, true, label)
         assertEquals("Kitchen war", r.heading)
     }
 

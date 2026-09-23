@@ -100,59 +100,48 @@ fun CaptionScreen(
             }
         }
 
-        val formatted = state.formatted
         @OptIn(ExperimentalLayoutApi::class)
         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             CaptionFormat.entries.forEach { format ->
                 FilterChip(
-                    selected = formatted.format == format,
+                    selected = state.format == format,
                     onClick = { viewModel.selectFormat(format) },
                     label = { Text(format.label) },
                 )
             }
         }
 
-        if (formatted.format.prefix == null) {
-            OutlinedTextField(
-                value = state.caption,
-                onValueChange = viewModel::updateCaption,
-                label = { Text("Caption") },
-                modifier = Modifier.fillMaxWidth().onFocusChanged { focus ->
-                    if (!focus.isFocused) viewModel.commitManualEdit()
-                },
-                minLines = 3,
-            )
-        } else {
-            // The label is fixed: shown, but not editable and never sent to the AI.
+        // A layout's label is fixed: shown, but not editable and never sent to the AI. A plain post has none.
+        state.format.prefix?.let { label ->
             Surface(color = MaterialTheme.colorScheme.surfaceVariant, modifier = Modifier.fillMaxWidth()) {
                 Row(
                     modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.SpaceBetween,
                 ) {
-                    Text(formatted.format.prefix!!.trimEnd(), style = MaterialTheme.typography.titleSmall)
+                    Text(label.trimEnd(), style = MaterialTheme.typography.titleSmall)
                     Text("fixed", style = MaterialTheme.typography.labelSmall)
                 }
             }
-            OutlinedTextField(
-                value = formatted.heading,
-                onValueChange = viewModel::updateHeading,
-                label = { Text("Heading") },
-                singleLine = true,
-                modifier = Modifier.fillMaxWidth().onFocusChanged { focus ->
-                    if (!focus.isFocused) viewModel.commitManualEdit()
-                },
-            )
-            OutlinedTextField(
-                value = formatted.body,
-                onValueChange = viewModel::updateBody,
-                label = { Text("Caption") },
-                modifier = Modifier.fillMaxWidth().onFocusChanged { focus ->
-                    if (!focus.isFocused) viewModel.commitManualEdit()
-                },
-                minLines = 3,
-            )
         }
+        OutlinedTextField(
+            value = state.heading,
+            onValueChange = viewModel::updateHeading,
+            label = { Text(if (state.format.prefix == null) "Heading (optional)" else "Heading") },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth().onFocusChanged { focus ->
+                if (!focus.isFocused) viewModel.commitManualEdit()
+            },
+        )
+        OutlinedTextField(
+            value = state.body,
+            onValueChange = viewModel::updateBody,
+            label = { Text("Caption") },
+            modifier = Modifier.fillMaxWidth().onFocusChanged { focus ->
+                if (!focus.isFocused) viewModel.commitManualEdit()
+            },
+            minLines = 3,
+        )
 
         MoodPicker(selected = state.mood, onSelect = viewModel::selectMood, enabled = !state.isEnhancing)
         HashtagPicker(caption = state.caption, onAdd = viewModel::addHashtag, enabled = !state.isEnhancing)
