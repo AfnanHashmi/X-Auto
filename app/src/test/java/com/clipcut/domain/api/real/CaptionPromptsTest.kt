@@ -84,6 +84,15 @@ class CaptionPromptsTest {
     }
 
     @Test
+    fun templateModeForbidsTheCaptionFromRestatingTheHeading() {
+        // Heading and caption used to open with the same hook, so the post said the same thing twice.
+        val t = buildPrompt(CaptionMood.FIGHT, templateMode = true)
+        assertTrue(t.contains("HEADING AND CAPTION ARE ONE POST"))
+        assertTrue(t.contains("must NEVER restate the heading"))
+        assertFalse(buildPrompt(CaptionMood.FIGHT).contains("HEADING AND CAPTION ARE ONE POST"))
+    }
+
+    @Test
     fun templateModeAddsTheHeadingRulesOnlyWhenAsked() {
         assertFalse(buildPrompt(CaptionMood.FIGHT).contains("TEMPLATE MODE"))
         val t = buildPrompt(CaptionMood.FIGHT, templateMode = true)

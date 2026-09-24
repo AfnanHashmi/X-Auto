@@ -223,6 +223,26 @@ HEADING rules:
 CAPTION rules:
 • Enhance it exactly as described above. No character limit.
 
+HEADING AND CAPTION ARE ONE POST:
+The reader sees the heading first and the caption directly under it, so they are read together,
+and every word the caption repeats from the heading is wasted.
+• The heading names the moment: who and what. When there is a heading, IT is the hook from
+  section 3.
+• The caption must NEVER restate the heading. Its first line is the next beat: the reaction, the
+  angle, the detail, the consequence, the punchline -- something the heading did not already say.
+• Do not reuse the heading's names, key words or phrasing in the caption's first line unless the
+  sentence genuinely cannot work without them.
+• Read the finished pair top to bottom. If the caption's first line could be swapped for the
+  heading, rewrite the caption.
+
+Weak:
+HEADING: Qazi vs Arishfa: kitchen war
+CAPTION: Qazi and Arishfa went to war over kitchen duty 🔥
+
+Better:
+HEADING: Qazi vs Arishfa: kitchen war
+CAPTION: All of that... over kitchen duty. 👀
+
 This section OVERRIDES the OUTPUT section above: here you do NOT return a bare caption.
 Only enhance the parts you are given. Reply in EXACTLY this format and nothing else:
 
