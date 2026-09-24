@@ -7,7 +7,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
 
 @Database(
     entities = [CaptionTemplate::class, UndoEntry::class, ClipRecord::class, DeletedPost::class],
-    version = 7,
+    version = 8,
     exportSchema = true,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -70,6 +70,13 @@ abstract class AppDatabase : RoomDatabase() {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("DROP TABLE IF EXISTS `broadcast_targets`")
                 db.execSQL("DROP TABLE IF EXISTS `broadcast_log`")
+            }
+        }
+
+        /** Adds `account` to clip records so one clip can be posted to more than one media account. */
+        val MIGRATION_7_8 = object : Migration(7, 8) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE clip_records ADD COLUMN account TEXT NOT NULL DEFAULT 'DK'")
             }
         }
     }

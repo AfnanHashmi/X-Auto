@@ -40,6 +40,9 @@ android {
             "X_MEDIA_ACCESS_TOKEN", "X_MEDIA_ACCESS_SECRET",
             "X_MAIN_CONSUMER_KEY", "X_MAIN_CONSUMER_SECRET",
             "X_MAIN_ACCESS_TOKEN", "X_MAIN_ACCESS_SECRET",
+            // The second media account (BB). Blank until its keys are added; the app then keeps it disabled.
+            "X_BB_CONSUMER_KEY", "X_BB_CONSUMER_SECRET",
+            "X_BB_ACCESS_TOKEN", "X_BB_ACCESS_SECRET", "X_BB_HANDLE",
             "OPENAI_API_KEY",
         )) {
             buildConfigField("String", key, "\"${localProperties.getProperty(key, "")}\"")

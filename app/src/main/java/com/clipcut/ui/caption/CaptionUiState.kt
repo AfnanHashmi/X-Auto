@@ -29,6 +29,8 @@ data class CaptionUiState(
     val uploadOutcomeUnknown: Boolean = false,
     /** The generator opened without a clip: nothing to upload, and only the caption is copied. */
     val standalone: Boolean = false,
+    /** Which media account this clip is being posted to ("DK" or "BB"). */
+    val mediaAccountLabel: String = "",
 ) {
     /** The exact text that is copied and posted: the layout's label, the heading, then the caption. */
     val caption: String get() = CaptionFormatText.compose(format, heading, body)

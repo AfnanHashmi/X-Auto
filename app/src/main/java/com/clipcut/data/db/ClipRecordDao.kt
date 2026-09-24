@@ -17,8 +17,12 @@ interface ClipRecordDao {
     @Query("SELECT * FROM clip_records ORDER BY id DESC")
     fun observeAll(): Flow<List<ClipRecord>>
 
-    @Query("SELECT * FROM clip_records WHERE filePath = :filePath LIMIT 1")
-    suspend fun findByPath(filePath: String): ClipRecord?
+    @Query("SELECT * FROM clip_records WHERE filePath = :filePath AND account = :account LIMIT 1")
+    suspend fun findByPath(filePath: String, account: String): ClipRecord?
+
+    /** Marks the clip's main-account step done for the post that was actually made (a post id is unique). */
+    @Query("UPDATE clip_records SET posted = 1 WHERE filePath = :filePath AND mediaRefId = :mediaRefId")
+    suspend fun markPosted(filePath: String, mediaRefId: String)
 }
 
 /**
@@ -27,9 +31,10 @@ interface ClipRecordDao {
  * `lan_clip_<startEpochMs>.mp4`, so the start time is recovered from the name; the end time is not
  * known here and nothing reads it, so it is stored as 0.
  */
-suspend fun ClipRecordDao.getOrCreate(filePath: String): ClipRecord {
-    findByPath(filePath)?.let { return it }
+suspend fun ClipRecordDao.getOrCreate(filePath: String, account: String): ClipRecord {
+    findByPath(filePath, account)?.let { return it }
     val startEpochMs = Regex("""lan_clip_(\d+)""").find(java.io.File(filePath).name)?.groupValues?.get(1)?.toLongOrNull() ?: 0L
-    val id = insert(ClipRecord(filePath = filePath, startEpochMs = startEpochMs, endEpochMs = 0L))
-    return findByPath(filePath) ?: ClipRecord(id = id, filePath = filePath, startEpochMs = startEpochMs, endEpochMs = 0L)
+    val id = insert(ClipRecord(filePath = filePath, account = account, startEpochMs = startEpochMs, endEpochMs = 0L))
+    return findByPath(filePath, account)
+        ?: ClipRecord(id = id, filePath = filePath, account = account, startEpochMs = startEpochMs, endEpochMs = 0L)
 }

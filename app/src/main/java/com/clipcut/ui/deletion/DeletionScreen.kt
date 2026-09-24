@@ -80,7 +80,7 @@ fun DeletionScreen(
 
     Screen(
         title = "Trigger Deletion",
-        subtitle = "Delete posts from @${DeletionService.EXPECTED_HANDLE} in a time period",
+        subtitle = "Delete posts from @${state.account.handle} (${state.account.label}) in a time period",
         modifier = modifier,
     ) {
         when (state.phase) {
@@ -104,8 +104,8 @@ private fun PickStep(state: DeletionUiState, vm: DeletionViewModel, onOpenHistor
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         WarningCard(
-            "Every post @${DeletionService.EXPECTED_HANDLE} made in the chosen period is listed, whatever it says. " +
-                "Your main account is never touched. Nothing is deleted until you review the list and confirm, and deleted posts cannot be restored.",
+            "Every post @${state.account.handle} made in the chosen period is listed, whatever it says. " +
+                "Only the ${state.account.label} account is touched, and your main account never is. Nothing is deleted until you review the list and confirm, and deleted posts cannot be restored.",
         )
 
         SectionCard("Time period") {
@@ -171,7 +171,7 @@ private fun PickStep(state: DeletionUiState, vm: DeletionViewModel, onOpenHistor
 private fun FindingStep(state: DeletionUiState, vm: DeletionViewModel) {
     Column(verticalArrangement = Arrangement.spacedBy(12.dp), horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
         CircularProgressIndicator()
-        Text("Scanning @${DeletionService.EXPECTED_HANDLE} - page ${state.pages}, ${state.scanned} posts checked")
+        Text("Scanning @${state.account.handle} - page ${state.pages}, ${state.scanned} posts checked")
         Text("Nothing is deleted in this step.", style = MaterialTheme.typography.titleSmall)
         TextButton(onClick = vm::cancelFind) { Text("Stop") }
     }

@@ -2,6 +2,7 @@ package com.clipcut.domain.deletion
 
 import com.clipcut.data.db.DeletedPost
 import com.clipcut.data.db.DeletedPostDao
+import com.clipcut.data.x.MediaClients
 import com.clipcut.data.x.XApiClient
 import com.clipcut.data.x.XApiException
 import kotlinx.coroutines.NonCancellable
@@ -10,10 +11,10 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.withContext
+import com.clipcut.domain.api.MediaAccount
 import java.io.IOException
 import java.time.Instant
 import javax.inject.Inject
-import javax.inject.Named
 import javax.inject.Singleton
 import kotlin.random.Random
 
@@ -63,7 +64,7 @@ data class RunResult(
  *
  * Deletion is the one irreversible thing this app does, and the account's standing is at stake, so
  * every rule lives here in code rather than in the UI:
- *  - only the media account, and only after its handle is verified to be [EXPECTED_HANDLE] (a swapped
+ *  - only the selected media account, and only after its handle is verified to be [MediaAccount.handle] (a swapped
  *    credential block must fail closed, not quietly delete from the wrong account);
  *  - only posts from that account's own timeline, inside the window (any text: the BB LOGS-only rule
  *    was deliberately lifted, so the window, the review list and the confirm are the guards now);
@@ -74,12 +75,18 @@ data class RunResult(
  */
 @Singleton
 class DeletionService @Inject constructor(
-    @Named("media") private val client: XApiClient,
+    private val clients: MediaClients,
     private val log: DeletedPostDao,
 ) {
     /** The read-only pass: nothing is deleted here. */
-    suspend fun find(range: DeletionRange, now: Instant, onProgress: (pages: Int, scanned: Int) -> Unit): FindResult {
-        val me = verifiedAccount()
+    suspend fun find(
+        account: MediaAccount,
+        range: DeletionRange,
+        now: Instant,
+        onProgress: (pages: Int, scanned: Int) -> Unit,
+    ): FindResult {
+        val client = clients.clientFor(account)
+        val me = verifiedAccount(account, client)
         val blocked = log.allIds().toHashSet()
         // X rejects an end_time too close to the present, and nothing newer than that can be in the window anyway.
         val end = minOf(range.endExclusive, now.minusSeconds(END_MARGIN_SEC))
@@ -121,6 +128,7 @@ class DeletionService @Inject constructor(
      * never in the middle of a request.
      */
     suspend fun delete(
+        account: MediaAccount,
         runId: String,
         queue: List<DeletionCandidate>,
         now: () -> Instant = Instant::now,
@@ -132,20 +140,21 @@ class DeletionService @Inject constructor(
             return RunResult(RunStop.HardError("Another deletion run is already going."), 0, 0, queue.size)
         }
         try {
-            return runDelete(runId, queue, now, onOutcome)
+            return runDelete(account, runId, queue, now, onOutcome)
         } finally {
             runLock.unlock()
         }
     }
 
     private suspend fun runDelete(
+        account: MediaAccount,
         runId: String,
         queue: List<DeletionCandidate>,
         now: () -> Instant,
         onOutcome: (id: String, CandidateOutcome) -> Unit,
     ): RunResult {
-        try {
-            verifiedAccount()
+        val client = try {
+            clients.clientFor(account).also { verifiedAccount(account, it) }
         } catch (e: kotlinx.coroutines.CancellationException) {
             throw e // a CancellationException is an IllegalStateException; never report a stop as an error
         } catch (e: IOException) {
@@ -181,7 +190,7 @@ class DeletionService @Inject constructor(
             // The request and its log write are one uninterruptible unit: a cancel that landed mid-request
             // would discard a real deletion's result and leave X and the log disagreeing.
             val startedAt = System.currentTimeMillis()
-            val step = withContext(NonCancellable) { deleteOne(runId, c, now) }
+            val step = withContext(NonCancellable) { deleteOne(client, runId, c, now) }
             lastCallMs = System.currentTimeMillis() - startedAt
             when (step) {
                 is Step.Settled -> {
@@ -203,7 +212,7 @@ class DeletionService @Inject constructor(
         data class Halt(val stop: RunStop) : Step
     }
 
-    private suspend fun deleteOne(runId: String, c: DeletionCandidate, now: () -> Instant): Step {
+    private suspend fun deleteOne(client: XApiClient, runId: String, c: DeletionCandidate, now: () -> Instant): Step {
         fun row(outcome: String) = DeletedPost(
             tweetId = c.id,
             text = c.text,
@@ -248,12 +257,12 @@ class DeletionService @Inject constructor(
         } catch (e: IOException) {
             // No HTTP reply, usually a timeout on a slow link -- but X may well have carried the delete
             // out anyway (it did, the first time this happened). Ask, rather than leaving it unknown.
-            settleByAsking(c, ::row, e)
+            settleByAsking(client, c, ::row, e)
         }
     }
 
     /** Resolves a timed-out delete with one read. Only if that read fails too is the outcome unknown. */
-    private suspend fun settleByAsking(c: DeletionCandidate, row: (String) -> DeletedPost, cause: IOException): Step =
+    private suspend fun settleByAsking(client: XApiClient, c: DeletionCandidate, row: (String) -> DeletedPost, cause: IOException): Step =
         try {
             if (client.tweetExists(c.id)) {
                 log.discardInFlight(c.id)
@@ -268,24 +277,23 @@ class DeletionService @Inject constructor(
 
     private val runLock = kotlinx.coroutines.sync.Mutex()
 
-    @Volatile
-    private var verified: com.clipcut.data.x.XUser? = null
+    // One verified identity per account: a switch from DK to BB must never reuse DK's.
+    private val verified = java.util.concurrent.ConcurrentHashMap<MediaAccount, com.clipcut.data.x.XUser>()
 
     /**
-     * Proves the credentials belong to [EXPECTED_HANDLE] before anything is touched. Cached for the life
-     * of the process: the keys are compiled in and cannot change under us, and on a slow link this call
+     * Proves the keys belong to [account]'s handle before anything is touched. Cached for the life of
+     * the process: the keys are compiled in and cannot change under us, and on a slow link this call
      * costs as much as a deletion does.
      */
-    private suspend fun verifiedAccount(): com.clipcut.data.x.XUser = verified ?: client.getMe().also {
-        check(it.username.equals(EXPECTED_HANDLE, ignoreCase = true)) {
-            "The media API keys belong to @${it.username}, not @$EXPECTED_HANDLE. Refusing to delete anything."
+    private suspend fun verifiedAccount(account: MediaAccount, client: XApiClient): com.clipcut.data.x.XUser =
+        verified[account] ?: client.getMe().also {
+            check(it.username.equals(account.handle, ignoreCase = true)) {
+                "The ${account.label} keys belong to @${it.username}, not @${account.handle}. Refusing to delete anything."
+            }
+            verified[account] = it
         }
-        verified = it
-    }
 
     companion object {
-        /** The only account this feature will ever touch; a credential mix-up must fail closed. */
-        const val EXPECTED_HANDLE = "dk_account"
         const val MAX_PAGES = 10
         const val PAGE_PACING_MS = 1_500L
         const val PACE_MS = 3_000L
