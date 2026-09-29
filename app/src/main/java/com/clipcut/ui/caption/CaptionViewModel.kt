@@ -16,8 +16,6 @@ import com.clipcut.domain.api.CaptionFormat
 import com.clipcut.domain.api.CaptionFormatText
 import com.clipcut.domain.api.CaptionMood
 import com.clipcut.domain.api.CaptionSnapshot
-import com.clipcut.data.x.MediaAccountSelector
-import com.clipcut.domain.api.MediaAccount
 import com.clipcut.domain.api.MediaAccountApi
 import com.clipcut.domain.api.MediaRef
 import com.clipcut.domain.api.MediaUploader
@@ -40,15 +38,10 @@ class CaptionViewModel @Inject constructor(
     private val captionTemplateDao: CaptionTemplateDao,
     private val undoEntryDao: UndoEntryDao,
     private val clipRecordDao: ClipRecordDao,
-    mediaAccountSelector: MediaAccountSelector,
 ) : ViewModel() {
 
     private val clipPath: String = Uri.decode(checkNotNull(savedStateHandle["clipPath"]))
     private val sessionId = UUID.randomUUID().toString()
-
-    // Fixed for this screen's whole life: the clip's record, its upload and its "latest post" lookup all
-    // belong to one account, whatever is selected on the home screen afterwards.
-    private val account: MediaAccount = mediaAccountSelector.active
 
     // Manual edits are coalesced into a single undo step per "typing run" rather than per
     // keystroke: the pre-edit post is captured once (here) and pushed to the undo stack only
@@ -59,7 +52,7 @@ class CaptionViewModel @Inject constructor(
     private val standalone = clipPath == STANDALONE_PATH
 
     private val _uiState = MutableStateFlow(
-        CaptionUiState(clipPath = clipPath, standalone = standalone, isUploading = !standalone, mediaAccountLabel = account.label),
+        CaptionUiState(clipPath = clipPath, standalone = standalone, isUploading = !standalone),
     )
     val uiState: StateFlow<CaptionUiState> = _uiState.asStateFlow()
 
@@ -83,7 +76,7 @@ class CaptionViewModel @Inject constructor(
             // Uploading publishes a real post on the media account, so it must happen at most once
             // per clip -- and this ViewModel is recreated whenever Android kills the app in the
             // background and the user comes back. The record is what survives that.
-            val record = clipRecordDao.getOrCreate(clipPath, account.name)
+            val record = clipRecordDao.getOrCreate(clipPath)
             if (record.mediaRefId != null) {
                 _uiState.update {
                     it.copy(
@@ -118,16 +111,16 @@ class CaptionViewModel @Inject constructor(
         if (uploadInFlight) return
         uploadInFlight = true
         try {
-            val record = clipRecordDao.getOrCreate(clipPath, account.name)
+            val record = clipRecordDao.getOrCreate(clipPath)
             if (record.mediaRefId != null) return
             // Persist the marker BEFORE the request, so a kill at any later point is detectable.
             clipRecordDao.update(record.copy(uploadAttempted = true))
             _uiState.update { it.copy(isUploading = true, uploadOutcomeUnknown = false, statusMessage = null) }
 
-            mediaUploader.upload(File(clipPath), account).fold(
+            mediaUploader.upload(File(clipPath)).fold(
                 onSuccess = { ref ->
                     // Save the reference before showing it, so "Uploaded" always means "recorded".
-                    clipRecordDao.getOrCreate(clipPath, account.name).let {
+                    clipRecordDao.getOrCreate(clipPath).let {
                         clipRecordDao.update(it.copy(mediaRefId = ref.id, mediaRefUrl = ref.url, uploadAttempted = false))
                     }
                     _uiState.update { it.copy(isUploading = false, mediaRef = ref) }
@@ -145,7 +138,7 @@ class CaptionViewModel @Inject constructor(
                         }
                     } else {
                         // A definitive rejection: nothing was posted, so a retry is safe.
-                        clipRecordDao.getOrCreate(clipPath, account.name).let { clipRecordDao.update(it.copy(uploadAttempted = false)) }
+                        clipRecordDao.getOrCreate(clipPath).let { clipRecordDao.update(it.copy(uploadAttempted = false)) }
                         _uiState.update { it.copy(isUploading = false, statusMessage = "Upload failed: ${e.message}") }
                     }
                 },
@@ -157,7 +150,7 @@ class CaptionViewModel @Inject constructor(
 
     private fun loadLatestPost() {
         viewModelScope.launch {
-            mediaAccountApi.getLatestPost(account).onSuccess { post ->
+            mediaAccountApi.getLatestPost().onSuccess { post ->
                 _uiState.update { it.copy(embeddedPost = post) }
             }
         }

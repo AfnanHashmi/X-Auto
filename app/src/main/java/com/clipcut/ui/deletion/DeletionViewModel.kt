@@ -2,7 +2,6 @@ package com.clipcut.ui.deletion
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.clipcut.data.x.MediaAccountSelector
 import com.clipcut.domain.deletion.CandidateOutcome
 import com.clipcut.domain.deletion.DeletionPreset
 import com.clipcut.domain.deletion.DeletionRange
@@ -34,12 +33,8 @@ import javax.inject.Inject
 @HiltViewModel
 class DeletionViewModel @Inject constructor(
     private val service: DeletionService,
-    mediaAccountSelector: MediaAccountSelector,
 ) : ViewModel() {
-    // Read once. Everything this screen lists, confirms and deletes belongs to this account.
-    private val account = mediaAccountSelector.active
-
-    private val _uiState = MutableStateFlow(DeletionUiState(account = account))
+    private val _uiState = MutableStateFlow(DeletionUiState())
     val uiState: StateFlow<DeletionUiState> = _uiState.asStateFlow()
 
     private var job: Job? = null
@@ -84,7 +79,7 @@ class DeletionViewModel @Inject constructor(
         _uiState.update { it.copy(phase = DeletionPhase.FINDING, error = null, pages = 0, scanned = 0) }
         job = viewModelScope.launch {
             try {
-                val found = service.find(account, range, now) { pages, scanned ->
+                val found = service.find(range, now) { pages, scanned ->
                     _uiState.update { it.copy(pages = pages, scanned = scanned) }
                 }
                 _uiState.update {
@@ -143,7 +138,7 @@ class DeletionViewModel @Inject constructor(
         }
         job = viewModelScope.launch {
             val result = try {
-                service.delete(account, UUID.randomUUID().toString(), queue) { id, outcome ->
+                service.delete(UUID.randomUUID().toString(), queue) { id, outcome ->
                     _uiState.update { st ->
                         st.copy(
                             runSettled = st.runSettled + 1,
@@ -187,7 +182,7 @@ class DeletionViewModel @Inject constructor(
     /** Back to the start; the next find re-reads X, so posts deleted meanwhile are not offered again. */
     fun reset() {
         job?.cancel()
-        _uiState.update { DeletionUiState(account = account, preset = it.preset, customFrom = it.customFrom, customTo = it.customTo) }
+        _uiState.update { DeletionUiState(preset = it.preset, customFrom = it.customFrom, customTo = it.customTo) }
     }
 
     private fun label(t: Instant): String = LABEL.format(t.atZone(zone))

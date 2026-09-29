@@ -9,11 +9,13 @@ import java.io.File
 data class MediaRef(val id: String, val url: String)
 
 /**
- * Uploads an exported clip to a media account. The [account] is chosen by the caller and stays fixed for
- * the whole upload, so a clip's INIT, chunks and tweet can never be signed by two different accounts.
+ * Uploads an exported clip to the "media" account.
+ *
+ * STUB: implement against the real media-account upload API/SDK. Swap the binding in
+ * `di/ApiModule.kt` from `FakeMediaUploader` to the real implementation; no caller changes.
  */
 interface MediaUploader {
-    suspend fun upload(clipFile: File, account: MediaAccount): Result<MediaRef>
+    suspend fun upload(clipFile: File): Result<MediaRef>
 }
 
 /**

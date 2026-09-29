@@ -12,12 +12,25 @@ import javax.inject.Named
 import javax.inject.Singleton
 
 /**
- * The main account's [XApiClient]. The media accounts (DK, BB) are not provided here: which one is
- * in use is decided per operation, so they come from `MediaClients` instead.
+ * One [XApiClient] per X account, each with its own consumer key/secret and access token/secret
+ * (see `RealMediaUploader`'s doc comment for why the two accounts can't share a single client).
  */
 @Module
 @InstallIn(SingletonComponent::class)
 object XApiModule {
+    @Provides
+    @Singleton
+    @Named("media")
+    fun provideMediaXApiClient(okHttpClient: OkHttpClient): XApiClient = XApiClient(
+        okHttpClient,
+        OAuth1aSigner(
+            consumerKey = BuildConfig.X_MEDIA_CONSUMER_KEY,
+            consumerSecret = BuildConfig.X_MEDIA_CONSUMER_SECRET,
+            accessToken = BuildConfig.X_MEDIA_ACCESS_TOKEN,
+            accessTokenSecret = BuildConfig.X_MEDIA_ACCESS_SECRET,
+        ),
+    )
+
     @Provides
     @Singleton
     @Named("main")

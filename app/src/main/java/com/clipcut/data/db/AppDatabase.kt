@@ -7,7 +7,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
 
 @Database(
     entities = [CaptionTemplate::class, UndoEntry::class, ClipRecord::class, DeletedPost::class],
-    version = 8,
+    version = 9,
     exportSchema = true,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -73,11 +73,41 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
-        /** Adds `account` to clip records so one clip can be posted to more than one media account. */
-        val MIGRATION_7_8 = object : Migration(7, 8) {
+        /**
+         * Removes the second media account (BB) from the app. Builds v9 from v8 by rebuilding `clip_records`
+         * without its `account` column (SQLite before 3.35 cannot drop a column, and minSdk is 26).
+         *
+         * Nothing is deleted. Rows for any account other than DK are first copied, with their `account`
+         * column, into `archived_other_account_clips`, which no code reads. They cannot stay in
+         * `clip_records`: with the column gone the same clip file could not be told apart, and a leftover BB
+         * row would be found by the DK upload guard and treated as "this clip is already uploaded".
+         */
+        val MIGRATION_8_9 = object : Migration(8, 9) {
             override fun migrate(db: SupportSQLiteDatabase) {
-                db.execSQL("ALTER TABLE clip_records ADD COLUMN account TEXT NOT NULL DEFAULT 'DK'")
+                db.execSQL(
+                    "CREATE TABLE `archived_other_account_clips` AS " +
+                        "SELECT * FROM clip_records WHERE account <> 'DK'",
+                )
+                db.execSQL(
+                    "CREATE TABLE `clip_records_new` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+                        "`filePath` TEXT NOT NULL, `startEpochMs` INTEGER NOT NULL, `endEpochMs` INTEGER NOT NULL, " +
+                        "`mediaRefId` TEXT, `mediaRefUrl` TEXT, `posted` INTEGER NOT NULL, " +
+                        "`postAttempted` INTEGER NOT NULL, `uploadAttempted` INTEGER NOT NULL)",
+                )
+                db.execSQL(
+                    "INSERT INTO clip_records_new (id, filePath, startEpochMs, endEpochMs, mediaRefId, mediaRefUrl, " +
+                        "posted, postAttempted, uploadAttempted) " +
+                        "SELECT id, filePath, startEpochMs, endEpochMs, mediaRefId, mediaRefUrl, " +
+                        "posted, postAttempted, uploadAttempted FROM clip_records WHERE account = 'DK'",
+                )
+                db.execSQL("DROP TABLE clip_records")
+                db.execSQL("ALTER TABLE clip_records_new RENAME TO clip_records")
             }
+        }
+
+        /** A phone still on v7 (before BB existed) already has the v9 schema, so there is nothing to change. */
+        val MIGRATION_7_9 = object : Migration(7, 9) {
+            override fun migrate(db: SupportSQLiteDatabase) = Unit
         }
     }
 }

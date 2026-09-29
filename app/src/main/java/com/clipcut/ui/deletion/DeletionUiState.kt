@@ -1,6 +1,5 @@
 package com.clipcut.ui.deletion
 
-import com.clipcut.domain.api.MediaAccount
 import com.clipcut.domain.deletion.DeletionCandidate
 import com.clipcut.domain.deletion.DeletionPreset
 import com.clipcut.domain.deletion.RunResult
@@ -19,8 +18,6 @@ data class ReviewRow(
 
 data class DeletionUiState(
     val phase: DeletionPhase = DeletionPhase.PICK,
-    /** Fixed when the screen opens: the account whose posts are listed, and the only one this run can touch. */
-    val account: MediaAccount = MediaAccount.DK,
     val preset: DeletionPreset = DeletionPreset.LAST_1H,
     val customFrom: LocalDate? = null,
     val customTo: LocalDate? = null,

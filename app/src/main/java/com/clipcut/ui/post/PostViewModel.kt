@@ -5,6 +5,7 @@ import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.clipcut.data.db.ClipRecordDao
+import com.clipcut.data.db.getOrCreate
 import com.clipcut.domain.api.MainAccountApi
 import com.clipcut.domain.api.MainPostText
 import com.clipcut.domain.api.MediaRef
@@ -49,7 +50,7 @@ class PostViewModel @Inject constructor(
             mainAccountApi.post(caption, mediaRef).fold(
                 onSuccess = {
                     _uiState.update { it.copy(isPosting = false, isPosted = true) }
-                    clipRecordDao.markPosted(clipPath, mediaRef.id)
+                    clipRecordDao.getOrCreate(clipPath).let { clipRecordDao.update(it.copy(posted = true)) }
                     // The cache copy is no longer needed; the gallery copy in Movies/ClipCut is kept.
                     runCatching { File(clipPath).delete() }
                 },

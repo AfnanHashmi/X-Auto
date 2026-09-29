@@ -1,6 +1,5 @@
 package com.clipcut.domain.api.fake
 
-import com.clipcut.domain.api.MediaAccount
 import com.clipcut.domain.api.MediaAccountApi
 import com.clipcut.domain.api.MediaRef
 import com.clipcut.domain.api.Post
@@ -9,7 +8,7 @@ import javax.inject.Inject
 
 /** Fake used until the real media-account read API is wired in. */
 class FakeMediaAccountApi @Inject constructor() : MediaAccountApi {
-    override suspend fun getLatestPost(account: MediaAccount): Result<Post> {
+    override suspend fun getLatestPost(): Result<Post> {
         delay(300)
         return Result.success(
             Post(
