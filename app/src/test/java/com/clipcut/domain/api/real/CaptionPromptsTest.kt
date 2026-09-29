@@ -8,16 +8,15 @@ import org.junit.Test
 
 class CaptionPromptsTest {
     @Test
-    fun dialogueIsTheDefault() {
-        assertEquals(CaptionMood.DIALOGUE, CaptionMood.Default)
+    fun autoIsTheDefault() {
+        assertEquals(CaptionMood.AUTO, CaptionMood.Default)
     }
 
     @Test
-    fun allFifteenMoodsExistInTheSpecifiedOrder() {
+    fun exactlyTheNinePresetsExistInTheSpecifiedOrder() {
         assertEquals(
             listOf(
-                "Dialogue", "Fight", "Singing", "Fun", "Bashing", "Expose", "Emotional", "Appreciation",
-                "Savage", "Shock", "Cute", "Victory", "Frustration", "Confession", "Episode",
+                "Dialogue", "Fight", "Emotional / Cute", "Fun", "Bashing", "Appreciation", "Savage", "Victory", "Shock",
             ),
             CaptionMood.entries.filter { it != CaptionMood.AUTO }.map { it.label },
         )
@@ -39,27 +38,65 @@ class CaptionPromptsTest {
     @Test
     fun aMoodBlockNeverLeaksIntoAnotherMood() {
         val fight = buildPrompt(CaptionMood.FIGHT)
-        assertFalse(fight.contains(CaptionMood.CUTE.instructions.trim()))
-        assertFalse(fight.contains("Mood: Cute"))
+        assertFalse(fight.contains(CaptionMood.EMOTIONAL.instructions.trim()))
+        assertFalse(fight.contains("Mood: Emotional"))
+        assertFalse(fight.contains("DIALOGUE MODE"))
     }
 
     @Test
     fun specValuesAreExactForASample() {
         assertEquals(10, CaptionMood.SAVAGE.intensity)
-        assertEquals(1, CaptionMood.CONFESSION.emojiLevel)
-        assertEquals("headline + commentary", CaptionMood.EPISODE.structure)
+        assertEquals(2, CaptionMood.DIALOGUE.emojiLevel)
+        assertTrue(CaptionMood.EMOTIONAL.instructions.contains("Cute"))
     }
 
     @Test
-    fun autoAsksTheModelToPickFromAllFifteenAndNotToSayWhich() {
+    fun dialoguePolishesAndNeverRewrites() {
+        val p = buildPrompt(CaptionMood.DIALOGUE)
+        assertTrue(p.contains("DIALOGUE MODE -- POLISH, DO NOT REWRITE."))
+        // It must explicitly beat the master prompt's "rewrite, don't polish" rule, which comes first.
+        assertTrue(p.indexOf("DIALOGUE MODE") > p.indexOf("1. REWRITE, DON'T POLISH"))
+        assertTrue(p.contains("This overrides every rewrite instruction"))
+        assertTrue(p.contains("Change, replace, reorder, add or remove any spoken word"))
+        assertTrue(p.contains("Translate between Hindi and English"))
+    }
+
+    @Test
+    fun dialogueUsesTheSpeakerQuoteShapeAndContestantLabelsWhenUnnamed() {
+        val p = buildPrompt(CaptionMood.DIALOGUE)
+        assertTrue(p.contains("SPEAKER: \"What they said\""))
+        assertTrue(p.contains("CONTESTANT A: \"Hi there!!\""))
+        assertTrue(p.contains("CONTESTANT B: \"Hello, brother.\""))
+        assertTrue(p.contains("QAZI: \"Kya bol raha hai tu?!\""))
+        // The OUTPUT section forbids quoting the caption; dialogue must be exempt or the lines lose their quotes.
+        assertTrue(p.contains("quotation marks around each spoken line are required"))
+    }
+
+    @Test
+    fun dialogueInATemplateNeverRewritesLinesToAvoidRepeatingTheHeading() {
+        val t = buildPrompt(CaptionMood.DIALOGUE, templateMode = true)
+        assertTrue(t.contains("the spoken\n  lines are never changed to avoid repeating the heading"))
+    }
+
+    @Test
+    fun autoLooksBeyondThePresetsAndDoesNotSayWhichVoice() {
         val p = buildPrompt(CaptionMood.AUTO)
         assertTrue(p.startsWith("You are an expert X (Twitter) caption editor"))
         assertTrue(p.contains("Mood: Auto"))
-        for (mood in CaptionMood.entries.filter { it != CaptionMood.AUTO }) {
-            assertTrue("Auto prompt should list ${mood.label}", p.contains("\n${mood.label}\n"))
-        }
-        assertTrue(p.contains("Do not tell the user which mood was selected."))
+        assertTrue(p.contains("You are NOT limited to a fixed list of moods."))
+        assertTrue(p.contains("READ THE MOMENT"))
+        assertTrue(p.contains("dry sarcasm"))
+        assertTrue(p.contains("MATCH THE SCALE TO THE MOMENT"))
+        assertTrue(p.contains("Do not tell the user which voice you chose."))
         assertFalse(p.contains("Intensity:"))
+    }
+
+    @Test
+    fun autoHandsDialogueToTheDialogueRules() {
+        val p = buildPrompt(CaptionMood.AUTO)
+        assertTrue(p.contains("DIALOGUE IS A SPECIAL CASE"))
+        assertTrue(p.contains(CaptionMood.DIALOGUE.instructions.trim()))
+        assertTrue(p.trimEnd().endsWith("It must not change WHAT actually happened."))
     }
 
     @Test

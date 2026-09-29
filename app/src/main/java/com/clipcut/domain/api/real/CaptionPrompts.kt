@@ -176,32 +176,45 @@ Do not wrap the caption in quotation marks and do not use markdown formatting. E
 
 The output must be immediately copy-pasteable into X."""
 
-private const val AUTO_BLOCK = """━━━━━━━━━━━━━━━━━━━━
+/**
+ * Auto, the default. It is deliberately not "pick one of the presets": the presets are a menu for when
+ * you already know the voice you want, and Auto's job is the cases where you don't. So it reads the
+ * moment first, may use a voice the menu has no button for, and hands dialogue to the Dialogue rules.
+ */
+private val AUTO_BLOCK = """━━━━━━━━━━━━━━━━━━━━
 SELECTED MOOD
 ━━━━━━━━━━━━━━━━━━━━
 
 Mood: Auto
 
-Analyze the emotional character of the user's caption and automatically select the most appropriate mood from:
+You decide how this caption should sound. You are NOT limited to a fixed list of moods.
 
-Dialogue
-Fight
-Singing
-Fun
-Bashing
-Expose
-Emotional
-Appreciation
-Savage
-Shock
-Cute
-Victory
-Frustration
-Confession
-Episode
+1. FIRST, READ THE MOMENT (silently):
+- What actually happened, and who is involved?
+- What makes it worth posting: the conflict, the irony, the emotion, the absurdity, the skill, the
+  surprise, the awkwardness, the stakes?
+- How would the people watching this show react, and what would they say to each other about it?
+- What is the user's own stance: fan, critic, amused, shocked, moved, fed up? How strongly?
+- Is there a contrast, a turn, or a detail that is the real story rather than the obvious one?
 
-Do not tell the user which mood was selected.
-Simply enhance the caption using the most appropriate style.
+2. THEN CHOOSE THE VOICE that serves that moment best.
+It can be a familiar register -- heated, savage, funny, heartfelt, sweet, triumphant, shocked,
+appreciative, critical -- or one that no preset covers: dry sarcasm, deadpan, mock-seriousness,
+suspense, irony, awkward cringe, quiet disbelief, nostalgia, romance, chaos, pure hype, or a blend of
+two when the moment is genuinely mixed (a fight that is also absurd, a win that is also emotional).
+Pick the most precise voice, not the loudest one.
+
+3. MATCH THE SCALE TO THE MOMENT.
+Set intensity, rhythm, structure and emoji count to fit what happened, not to a preset level. A small
+moment gets a light touch; a huge one gets a big delivery. Never inflate a minor moment.
+
+4. DIALOGUE IS A SPECIAL CASE.
+If the caption is mainly an exchange of spoken lines between people (for example "qazi: ..." followed
+by "arishfa: ...", or lines that are clearly people talking to each other), do not rewrite it. Format
+and polish it exactly by these rules:
+${CaptionMood.DIALOGUE.instructions.trim()}
+
+Do not tell the user which voice you chose.
 
 Remember:
 The mood changes HOW the caption is expressed.
@@ -234,6 +247,8 @@ and every word the caption repeats from the heading is wasted.
   sentence genuinely cannot work without them.
 • Read the finished pair top to bottom. If the caption's first line could be swapped for the
   heading, rewrite the caption.
+• Exception: when the caption is dialogue (Dialogue mood, or Auto recognising dialogue), the spoken
+  lines are never changed to avoid repeating the heading. Polish them and leave their words alone.
 
 Weak:
 HEADING: Qazi vs Arishfa: kitchen war

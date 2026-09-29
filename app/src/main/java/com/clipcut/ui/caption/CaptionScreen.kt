@@ -281,16 +281,13 @@ private val HASHTAGS = listOf(
 
 private val MOOD_GROUPS = listOf(
     "🔥  Energy" to listOf(CaptionMood.FIGHT, CaptionMood.BASHING, CaptionMood.SAVAGE, CaptionMood.VICTORY, CaptionMood.SHOCK),
-    "🎭  Expression" to listOf(CaptionMood.DIALOGUE, CaptionMood.FUN, CaptionMood.SINGING, CaptionMood.EMOTIONAL, CaptionMood.CUTE),
-    "👀  Commentary" to listOf(
-        CaptionMood.EXPOSE, CaptionMood.CONFESSION, CaptionMood.FRUSTRATION, CaptionMood.APPRECIATION, CaptionMood.EPISODE,
-    ),
+    "🎭  Expression" to listOf(CaptionMood.DIALOGUE, CaptionMood.FUN, CaptionMood.EMOTIONAL, CaptionMood.APPRECIATION),
 )
 
 /**
  * Mood picker. A full-width button shows the current mood with a down arrow at its right edge;
- * tapping it opens a bottom sheet: Auto on top as a wide card, then the 15 moods as chips grouped
- * into Energy / Expression / Commentary.
+ * tapping it opens a bottom sheet: Auto on top as a wide card, then the 9 moods as chips grouped
+ * into Energy / Expression.
  */
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
@@ -323,11 +320,11 @@ private fun MoodPicker(selected: CaptionMood, onSelect: (CaptionMood) -> Unit, e
 
                 if (selected == CaptionMood.AUTO) {
                     Button(onClick = { pick(CaptionMood.AUTO) }, modifier = Modifier.fillMaxWidth()) {
-                        Text("✨  Auto  \u2013  picks the best fit")
+                        Text("✨  Auto  \u2013  reads the moment, any voice")
                     }
                 } else {
                     OutlinedButton(onClick = { pick(CaptionMood.AUTO) }, modifier = Modifier.fillMaxWidth()) {
-                        Text("✨  Auto  \u2013  picks the best fit")
+                        Text("✨  Auto  \u2013  reads the moment, any voice")
                     }
                 }
 

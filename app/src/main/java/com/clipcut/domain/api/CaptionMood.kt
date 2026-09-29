@@ -1,6 +1,60 @@
 package com.clipcut.domain.api
 
 /**
+ * How Dialogue presents a conversation. It is the one mood that must NOT rewrite: the user writes the
+ * lines, and the model only formats and polishes them. Shared with Auto, which switches to it when the
+ * caption turns out to be dialogue.
+ */
+internal const val DIALOGUE_RULES = """
+DIALOGUE MODE -- POLISH, DO NOT REWRITE.
+
+This overrides every rewrite instruction in this prompt (sections 1, 3, 4 and 6, checks A and C of the
+final check, and any rule about the caption not repeating a heading). The user gives rough dialogue.
+Your job is to present it beautifully, not to write new lines.
+
+FORMAT
+One spoken line per line, in exactly this shape:
+SPEAKER: "What they said"
+- The quotation marks around each spoken line are required, whatever the OUTPUT section says about quotes.
+- Speaker names in CAPITALS, using exactly the people the user named ("qazi" becomes QAZI).
+- If the user gives no names, label the speakers CONTESTANT A, CONTESTANT B, CONTESTANT C and so on,
+  in the order they first speak, and give the same person the same label every time.
+- Keep the user's order. Never add, drop, merge or split lines.
+- Narration that is not a spoken line (for example "then both walked out") stays on its own line,
+  polished, without quotes and without a speaker.
+
+POLISH -- ALLOWED
+- Capitalization, punctuation, spacing and line breaks.
+- Fixing obvious typos in English words. Hinglish words keep the user's own spelling.
+- Expressive punctuation (!!, ?!, ...) where the delivery clearly calls for it.
+- Emojis that fit how a line is said, placed after the closing quote. At most one per line, and not
+  on every line.
+
+NEVER
+- Change, replace, reorder, add or remove any spoken word. Every word stays; only the presentation changes.
+- Translate between Hindi and English.
+- Invent a speaker, a reply, a reaction or a sound effect.
+- Add commentary, a heading or new hashtags. Hashtags the user supplied go on one final line of their own.
+
+If there is a HEADING, polish it the same way and keep its words.
+
+EXAMPLES
+Input:
+hi there
+hello brother
+Output:
+CONTESTANT A: "Hi there!!" 👋
+CONTESTANT B: "Hello, brother."
+
+Input:
+qazi: kya bol raha hai tu
+arishfa: jo sach hai wahi bol rahi hu
+Output:
+QAZI: "Kya bol raha hai tu?!" 😤
+ARISHFA: "Jo sach hai, wahi bol rahi hu."
+"""
+
+/**
  * A caption mood: how the enhancer should EXPRESS the caption (never what happened). [emoji] and
  * [label] are what the picker shows; the rest feeds the prompt (see `CaptionPrompts.buildPrompt`).
  */
@@ -13,16 +67,18 @@ enum class CaptionMood(
     val emojiLevel: Int,
     val instructions: String,
 ) {
+    /** The default: the model reads the moment and chooses the voice itself, beyond this list if it fits. */
+    AUTO(
+        "✨", "Auto",
+        tone = "chosen automatically", intensity = 0,
+        structure = "chosen automatically", emojiLevel = 0,
+        instructions = "",
+    ),
     DIALOGUE(
         "🎬", "Dialogue",
-        tone = "dramatic, cinematic, memorable", intensity = 8,
-        structure = "short, quote-driven, dramatic", emojiLevel = 2,
-        instructions = """
-Make the caption feel like a memorable dialogue or cinematic moment.
-Emphasize the strongest line or statement already present in the input.
-Use dramatic pauses and punchy sentence structure.
-Do not fabricate dialogue.
-""",
+        tone = "true to how each line was said", intensity = 5,
+        structure = "one SPEAKER: \"line\" per line", emojiLevel = 2,
+        instructions = DIALOGUE_RULES,
     ),
     FIGHT(
         "⚔️", "Fight",
@@ -35,15 +91,15 @@ Use sharp wording and strong rhythm.
 Do not exaggerate the actual events beyond the user's input.
 """,
     ),
-    SINGING(
-        "🎤", "Singing",
-        tone = "musical, playful, energetic", intensity = 7,
-        structure = "rhythmic, light, performance-focused", emojiLevel = 3,
+    EMOTIONAL(
+        "🥹", "Emotional / Cute",
+        tone = "heartfelt, sincere, sweet, wholesome", intensity = 7,
+        structure = "warm, smooth, reflective", emojiLevel = 2,
         instructions = """
-Make the caption feel musical and entertaining.
-Highlight the singing, performance, voice, or musical moment.
-Use playful language and natural musical energy.
-Avoid generic praise unless supported by the original caption.
+Bring out the feeling already in the moment. Decide which of two notes it carries, or both:
+- Emotional: heartfelt, touching, sincere. Relatable rather than melodramatic.
+- Cute: sweet, wholesome, charming. Affectionate or adorable, but never childish.
+Avoid clichés whenever possible, and never invent sentiment the moment does not have.
 """,
     ),
     FUN(
@@ -69,28 +125,6 @@ Do not invent accusations, misconduct, or facts.
 Keep criticism focused on the content or behavior described by the user.
 """,
     ),
-    EXPOSE(
-        "👀", "Expose",
-        tone = "revealing, suspenseful, investigative", intensity = 8,
-        structure = "hook-first, suspenseful", emojiLevel = 2,
-        instructions = """
-Create a revealing and attention-grabbing tone.
-Make the strongest existing detail feel significant.
-Use suspense and curiosity without inventing hidden information.
-Never imply an undisclosed fact unless it exists in the input.
-""",
-    ),
-    EMOTIONAL(
-        "❤️", "Emotional",
-        tone = "heartfelt, sincere, touching", intensity = 8,
-        structure = "smooth, emotional, reflective", emojiLevel = 2,
-        instructions = """
-Bring out the emotional meaning already present.
-Make the caption heartfelt and relatable.
-Use sincere language rather than melodrama.
-Avoid clichés whenever possible.
-""",
-    ),
     APPRECIATION(
         "👑", "Appreciation",
         tone = "admiring, celebratory, warm", intensity = 7,
@@ -112,27 +146,6 @@ Keep it grounded in the original input.
 Do not invent insults or factual accusations.
 """,
     ),
-    SHOCK(
-        "😱", "Shock",
-        tone = "surprised, dramatic, reaction-heavy", intensity = 9,
-        structure = "hook-first, reaction-driven", emojiLevel = 3,
-        instructions = """
-Maximize the feeling of surprise or disbelief already present.
-Lead with the strongest reaction.
-Use short sentences and dramatic punctuation when appropriate.
-Do not manufacture shock by inventing information.
-""",
-    ),
-    CUTE(
-        "🥹", "Cute",
-        tone = "sweet, wholesome, charming", intensity = 6,
-        structure = "short, warm, playful", emojiLevel = 3,
-        instructions = """
-Make the caption sweet, wholesome, and charming.
-Highlight adorable, innocent, funny, or affectionate aspects already present.
-Keep it natural rather than overly childish.
-""",
-    ),
     VICTORY(
         "🏆", "Victory",
         tone = "triumphant, celebratory, powerful", intensity = 9,
@@ -144,49 +157,20 @@ Use strong, confident wording.
 Do not claim victory if the original caption doesn't establish it.
 """,
     ),
-    FRUSTRATION(
-        "😤", "Frustration",
-        tone = "annoyed, expressive, relatable", intensity = 8,
-        structure = "conversational, reaction-heavy", emojiLevel = 2,
+    SHOCK(
+        "😱", "Shock",
+        tone = "surprised, dramatic, reaction-heavy", intensity = 9,
+        structure = "hook-first, reaction-driven", emojiLevel = 3,
         instructions = """
-Make the frustration feel authentic and relatable.
-Use expressive language and natural X-style reactions.
-Do not unnecessarily escalate the situation beyond the original caption.
+Maximize the feeling of surprise or disbelief already present.
+Lead with the strongest reaction.
+Use short sentences and dramatic punctuation when appropriate.
+Do not manufacture shock by inventing information.
 """,
-    ),
-    CONFESSION(
-        "🗣️", "Confession",
-        tone = "candid, personal, honest", intensity = 7,
-        structure = "personal, conversational", emojiLevel = 1,
-        instructions = """
-Make the caption feel candid and personal.
-Create the feeling of someone openly expressing a thought or admission.
-Keep it conversational and emotionally authentic.
-Do not invent personal information.
-""",
-    ),
-    EPISODE(
-        "📺", "Episode",
-        tone = "reality-show commentary, energetic, observational", intensity = 8,
-        structure = "headline + commentary", emojiLevel = 2,
-        instructions = """
-Make the caption feel like sharp reality-show episode commentary.
-Focus on the moment, development, reaction, or game dynamics already present.
-Use concise commentary language suitable for X.
-The result should feel like it belongs to a live reality-show conversation.
-""",
-    ),
-
-    /** Not a mood of its own: the model picks whichever of the 15 fits the caption best. */
-    AUTO(
-        "✨", "Auto",
-        tone = "chosen automatically", intensity = 0,
-        structure = "chosen automatically", emojiLevel = 0,
-        instructions = "",
     );
 
     companion object {
         /** What the picker starts on. */
-        val Default = DIALOGUE
+        val Default = AUTO
     }
 }
