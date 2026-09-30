@@ -10,6 +10,10 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -31,16 +35,30 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.clipcut.data.x.BbLogsCounter
+import com.clipcut.data.x.MediaAccountSelector
+import com.clipcut.domain.api.MediaAccount
 import com.clipcut.lan.LanBufferActivity
 import com.clipcut.ui.caption.CaptionGeneratorActivity
 import com.clipcut.ui.components.Screen
+import com.clipcut.ui.components.SectionCard
 import com.clipcut.ui.deletion.DeletionActivity
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
 
 @HiltViewModel
-class HomeViewModel @Inject constructor(private val counter: BbLogsCounter) : ViewModel() {
-    fun nextCaption(): String = counter.nextCaption()
+class HomeViewModel @Inject constructor(
+    private val counter: BbLogsCounter,
+    private val selector: MediaAccountSelector,
+) : ViewModel() {
+    /** The media account that clips are posted to and that Trigger Deletion cleans up. */
+    val active: MediaAccount get() = selector.active
+
+    fun select(account: MediaAccount) {
+        if (account.isConfigured) selector.active = account
+    }
+
+    /** What the next post on the selected account will be captioned. */
+    fun nextCaption(): String = counter.nextCaption(selector.active)
 }
 
 @Composable
@@ -48,11 +66,13 @@ fun HomeScreen(modifier: Modifier = Modifier, viewModel: HomeViewModel = hiltVie
     val context = LocalContext.current
     // Re-read on every return to this screen: posting a clip or changing the schedule happens elsewhere.
     var caption by remember { mutableStateOf(viewModel.nextCaption()) }
+    var active by remember { mutableStateOf(viewModel.active) }
     val lifecycleOwner = LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_START) {
                 caption = viewModel.nextCaption()
+                active = viewModel.active
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
@@ -61,10 +81,18 @@ fun HomeScreen(modifier: Modifier = Modifier, viewModel: HomeViewModel = hiltVie
 
     Screen(title = "X Auto", subtitle = "Bigg Boss clipping and posting", modifier = modifier) {
         Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            AccountSwitcher(
+                active = active,
+                onSelect = { account ->
+                    viewModel.select(account)
+                    active = viewModel.active
+                    caption = viewModel.nextCaption()
+                },
+            )
             FeatureCard(
                 title = "Clip Cut",
                 body = "Watch the live feed, mark in and out, export and post.",
-                status = "Next post $caption",
+                status = "${active.label}: next post $caption",
                 onClick = { context.startActivity(Intent(context, LanBufferActivity::class.java)) },
             )
             FeatureCard(
@@ -76,7 +104,7 @@ fun HomeScreen(modifier: Modifier = Modifier, viewModel: HomeViewModel = hiltVie
             FeatureCard(
                 title = "Trigger Deletion",
                 body = "Review and delete the media account's posts from a chosen time period.",
-                status = "Media account only",
+                status = "${active.label} account only",
                 onClick = { DeletionActivity.start(context) },
             )
         }
@@ -87,6 +115,39 @@ fun HomeScreen(modifier: Modifier = Modifier, viewModel: HomeViewModel = hiltVie
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = TextAlign.Center,
         )
+    }
+}
+
+/**
+ * Chooses which media account clips are posted to and which one Trigger Deletion works on. An account
+ * whose keys are not in local.properties is shown but cannot be selected.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun AccountSwitcher(active: MediaAccount, onSelect: (MediaAccount) -> Unit) {
+    SectionCard("Media account") {
+        SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+            MediaAccount.entries.forEachIndexed { index, account ->
+                SegmentedButton(
+                    selected = account == active,
+                    onClick = { onSelect(account) },
+                    enabled = account.isConfigured,
+                    shape = SegmentedButtonDefaults.itemShape(index, MediaAccount.entries.size),
+                ) { Text(account.label) }
+            }
+        }
+        Text(
+            "Posts and deletions use @${active.handle}",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        MediaAccount.entries.filter { !it.isConfigured }.forEach { account ->
+            Text(
+                "${account.label} is not set up: its keys or caption label are missing from local.properties.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.error,
+            )
+        }
     }
 }
 

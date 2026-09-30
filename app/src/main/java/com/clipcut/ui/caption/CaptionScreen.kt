@@ -69,7 +69,7 @@ fun CaptionScreen(
         modifier = Modifier.verticalScroll(rememberScrollState()).padding(bottom = 24.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp),
       ) {
-        if (!state.standalone) SectionCard("Media post") {
+        if (!state.standalone) SectionCard(if (state.mediaAccountLabel.isBlank()) "Media post" else "Media post - ${state.mediaAccountLabel}") {
             if (state.isUploading) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)

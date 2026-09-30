@@ -40,6 +40,10 @@ android {
             "X_MEDIA_ACCESS_TOKEN", "X_MEDIA_ACCESS_SECRET",
             "X_MAIN_CONSUMER_KEY", "X_MAIN_CONSUMER_SECRET",
             "X_MAIN_ACCESS_TOKEN", "X_MAIN_ACCESS_SECRET",
+            // The second media account (RW, Reality World). Blank until all of these are added; the app then
+            // keeps it disabled. X_RW_CAPTION_LABEL is what its posts are captioned with, e.g. "RW LOGS".
+            "X_RW_CONSUMER_KEY", "X_RW_CONSUMER_SECRET",
+            "X_RW_ACCESS_TOKEN", "X_RW_ACCESS_SECRET", "X_RW_HANDLE", "X_RW_CAPTION_LABEL",
             "OPENAI_API_KEY",
         )) {
             buildConfigField("String", key, "\"${localProperties.getProperty(key, "")}\"")

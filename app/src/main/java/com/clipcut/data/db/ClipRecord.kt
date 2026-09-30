@@ -8,6 +8,9 @@ import androidx.room.PrimaryKey
 data class ClipRecord(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
     val filePath: String,
+    // Which media account this record is for. The same clip can be posted to DK and to BB, and each
+    // account needs its own record: the duplicate-post guard (uploadAttempted / mediaRefId) is per post.
+    val account: String = "DK",
     val startEpochMs: Long,
     val endEpochMs: Long,
     val mediaRefId: String? = null,
