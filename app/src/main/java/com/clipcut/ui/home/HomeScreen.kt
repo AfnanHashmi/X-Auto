@@ -143,7 +143,7 @@ private fun AccountSwitcher(active: MediaAccount, onSelect: (MediaAccount) -> Un
         )
         MediaAccount.entries.filter { !it.isConfigured }.forEach { account ->
             Text(
-                "${account.label} is not set up: its keys or caption label are missing from local.properties.",
+                "${account.label} is not set up: its keys are missing from local.properties.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.error,
             )

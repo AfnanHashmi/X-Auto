@@ -29,10 +29,30 @@ class MediaAccountTest {
     }
 
     @Test
-    fun aCaptionIsTheLabelADashAndAThreeDigitNumber() {
-        assertEquals("BB LOGS - 014", postCaption("BB LOGS", 14))
-        assertEquals("BB LOGS - 001", postCaption("BB LOGS", 1))
-        assertEquals("RW LOGS - 000", postCaption("RW LOGS", 0))
-        assertEquals("RW LOGS - 999", postCaption("RW LOGS", 999))
+    fun aCaptionIsTheLabelADashAndTheNumberPaddedToTheGivenDigits() {
+        assertEquals("BB LOGS - 014", postCaption("BB LOGS", 14, 3))
+        assertEquals("BB LOGS - 001", postCaption("BB LOGS", 1, 3))
+        assertEquals("BB LOGS - 0000", postCaption("BB LOGS", 0, 4))
+        assertEquals("BB LOGS - 0014", postCaption("BB LOGS", 14, 4))
+        assertEquals("BB LOGS - 9999", postCaption("BB LOGS", 9999, 4))
+    }
+
+    @Test
+    fun bothAccountsPostUnderBbLogsButDkUsesThreeDigitsAndRwFour() {
+        assertEquals("BB LOGS", MediaAccount.DK.captionLabel)
+        assertEquals("BB LOGS", MediaAccount.RW.captionLabel)
+        assertEquals(3, MediaAccount.DK.numberDigits)
+        assertEquals(4, MediaAccount.RW.numberDigits)
+        // DK's existing posts (BB LOGS - 082 and so on) must keep their shape.
+        assertEquals("BB LOGS - 082", postCaption(MediaAccount.DK.captionLabel, 82, MediaAccount.DK.numberDigits))
+        assertEquals("BB LOGS - 0000", postCaption(MediaAccount.RW.captionLabel, 0, MediaAccount.RW.numberDigits))
+    }
+
+    @Test
+    fun eachAccountsNumberWrapsAtItsOwnWidthSoRwNeverPostsAFiveDigitNumber() {
+        assertEquals(1_000, MediaAccount.DK.counterModulus)
+        assertEquals(10_000, MediaAccount.RW.counterModulus)
+        assertEquals(0, (999 + 1) % MediaAccount.DK.counterModulus)
+        assertEquals(0, (9_999 + 1) % MediaAccount.RW.counterModulus)
     }
 }

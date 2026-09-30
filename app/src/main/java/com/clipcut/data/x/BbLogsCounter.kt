@@ -11,11 +11,11 @@ import javax.inject.Singleton
 /**
  * Generates the "<label> - <counter>" caption used for every media-account post (label per account, e.g.
  * "BB LOGS - 014" for DK): counter
- * is zero-padded to 3 digits, 000..999, wrapping back to 000, and persisted across app restarts
+ * is zero-padded (three digits for DK, four for RW), wrapping back to zero, and persisted across app restarts
  * (SharedPreferences -- a single int per account, no need for Room).
  *
  * Each account numbers its own posts: DK's count is the original one and continues where it was, and
- * RW starts its own series at 001. Two accounts sharing one counter would leave gaps in both.
+ * RW starts its own series at 0000, with four digits. Two accounts sharing one counter would leave gaps in both.
  */
 @Singleton
 class BbLogsCounter @Inject constructor(
@@ -37,17 +37,18 @@ class BbLogsCounter @Inject constructor(
 
     /** Reserves and returns the next caption; call [commit] only after the post using it succeeds. */
     @Synchronized
-    fun nextCaption(account: MediaAccount): String = postCaption(account.captionLabel, current(account))
+    fun nextCaption(account: MediaAccount): String = postCaption(account.captionLabel, current(account), account.numberDigits)
 
     /** Advances [account]'s counter past the value last returned by [nextCaption]. A failed post never calls this. */
     @Synchronized
     fun commit(account: MediaAccount) {
-        prefs.edit { putInt(keyFor(account), (current(account) + 1) % 1000) }
+        prefs.edit { putInt(keyFor(account), (current(account) + 1) % account.counterModulus) }
     }
 
     private fun current(account: MediaAccount): Int = prefs.getInt(keyFor(account), firstFor(account))
 
-    private fun firstFor(account: MediaAccount): Int = if (account == MediaAccount.DK) 0 else FIRST_COUNTER_OTHER
+    // Only reached before an account has posted anything: RW's first post is "BB LOGS - 0000".
+    private fun firstFor(account: MediaAccount): Int = 0
 
     // DK keeps the original key, so its stored count carries over untouched.
     private fun keyFor(account: MediaAccount): String =
@@ -57,6 +58,5 @@ class BbLogsCounter @Inject constructor(
         const val KEY_COUNTER = "counter"
         const val KEY_SEEDED = "seeded_v1"
         const val FIRST_COUNTER_DK = 3
-        const val FIRST_COUNTER_OTHER = 1
     }
 }

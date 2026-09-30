@@ -23,6 +23,16 @@ class BbLogsMatcherTest {
     }
 
     @Test
+    fun matchesRwsFourDigitPostsAndKeepsTheirLeadingZeros() {
+        assertTrue(isBbLogsPost("BB LOGS - 0000"))
+        assertEquals(14, bbNumber("BB LOGS - 0014"))
+        assertEquals("BB LOGS - 0014", bbLabel("BB LOGS - 0014"))
+        assertEquals("BB LOGS - 0014", bbLabel("BB LOGS - 0014 https://t.co/aBc123"))
+        assertEquals("BB LOGS - 012", bbLabel("BB LOGS - 012 https://t.co/aBc123"))
+        assertNull(bbLabel("BB LOGS - 0014 and some words"))
+    }
+
+    @Test
     fun rejectsAnythingWithFreeTextAfterTheNumber() {
         assertFalse(isBbLogsPost("BB LOGS - 042 the fire scene"))
         assertFalse(isBbLogsPost("BB LOGS - 042 https://t.co/abc and more words"))
@@ -45,7 +55,7 @@ class BbLogsMatcherTest {
     @Test
     fun rejectsWrongDigitCountsCaseAndSeparators() {
         assertFalse(isBbLogsPost("BB LOGS - 42"))
-        assertFalse(isBbLogsPost("BB LOGS - 0421"))
+        assertFalse(isBbLogsPost("BB LOGS - 04211"))
         assertFalse(isBbLogsPost("bb logs - 042"))
         assertFalse(isBbLogsPost("BB LOGS -042"))
         assertFalse(isBbLogsPost("BB LOGS- 042"))

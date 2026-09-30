@@ -18,6 +18,7 @@ import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.ViewModel
 import com.clipcut.data.db.DeletedPost
 import com.clipcut.data.db.DeletedPostDao
+import com.clipcut.domain.deletion.bbLabel
 import dagger.hilt.android.lifecycle.HiltViewModel
 import java.time.Instant
 import java.time.ZoneId
@@ -52,7 +53,7 @@ fun DeletionHistoryScreen(
                 }
                 Column {
                     Text(
-                        r.bbNumber?.let { "BB LOGS - %03d".format(it) } ?: r.text.take(40),
+                        bbLabel(r.text) ?: r.text.take(40),
                         style = MaterialTheme.typography.bodyLarge,
                     )
                     Text(

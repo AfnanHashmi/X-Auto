@@ -32,15 +32,22 @@ enum class MediaAccount(val label: String) {
             RW -> BuildConfig.X_RW_HANDLE.trim().trimStart('@')
         }
 
-    /**
-     * What this account's posts are captioned with, before the number ("BB LOGS" gives "BB LOGS - 014").
-     * DK's is fixed. RW's comes from local.properties and has no default: a public account must never
-     * post under a label that was only guessed.
-     */
-    val captionLabel: String
+    /** What every post is captioned with, before the number: "BB LOGS - 014" (DK) or "BB LOGS - 0014" (RW). */
+    val captionLabel: String get() = "BB LOGS"
+
+    /** How many digits the number is padded to. DK's posts have always had three; RW's have four. */
+    val numberDigits: Int
         get() = when (this) {
-            DK -> "BB LOGS"
-            RW -> BuildConfig.X_RW_CAPTION_LABEL.trim()
+            DK -> 3
+            RW -> 4
+        }
+
+    /** The number wraps back to zero after this many posts: 999 -> 000 for DK, 9999 -> 0000 for RW. */
+    val counterModulus: Int
+        get() {
+            var modulus = 1
+            repeat(numberDigits) { modulus *= 10 }
+            return modulus
         }
 
     val credentials: XCredentials
@@ -55,12 +62,12 @@ enum class MediaAccount(val label: String) {
             )
         }
 
-    /** All four keys, the expected handle and the caption label are present; without them the account cannot be used. */
-    val isConfigured: Boolean get() = credentials.isComplete && handle.isNotBlank() && captionLabel.isNotBlank()
+    /** All four keys and the expected handle are present; without them the account cannot be used at all. */
+    val isConfigured: Boolean get() = credentials.isComplete && handle.isNotBlank()
 }
 
-/** The caption of the [number]th post: label, a dash, then the number zero-padded to three digits. */
-fun postCaption(label: String, number: Int): String = "%s - %03d".format(label, number)
+/** The caption of the [number]th post: label, a dash, then the number zero-padded to [digits] digits. */
+fun postCaption(label: String, number: Int, digits: Int): String = "%s - %0${digits}d".format(label, number)
 
 /**
  * Which account to use given what was stored. An unknown value, or an account that is not fully set up,

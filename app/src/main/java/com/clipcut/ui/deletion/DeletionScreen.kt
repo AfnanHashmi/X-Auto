@@ -46,6 +46,7 @@ import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import com.clipcut.domain.deletion.DeletionPreset
+import com.clipcut.domain.deletion.bbLabel
 import com.clipcut.ui.components.Screen
 import com.clipcut.ui.components.SectionCard
 import com.clipcut.ui.components.WarningCard
@@ -316,7 +317,7 @@ private fun DoneStep(state: DeletionUiState, vm: DeletionViewModel, onOpenHistor
 
 /** A BB LOGS post keeps its familiar name; anything else is shown as its text so it can be recognised. */
 private fun candidateTitle(c: com.clipcut.domain.deletion.DeletionCandidate): String =
-    c.bbNumber?.let { "BB LOGS - %03d".format(it) } ?: c.text.replace(Regex("\\s+"), " ").trim().take(90).ifEmpty { "(no text)" }
+    bbLabel(c.text) ?: c.text.replace(Regex("\\s+"), " ").trim().take(90).ifEmpty { "(no text)" }
 
 private fun statusLabel(status: RowStatus): String = when (status) {
     RowStatus.PENDING -> "waiting"
