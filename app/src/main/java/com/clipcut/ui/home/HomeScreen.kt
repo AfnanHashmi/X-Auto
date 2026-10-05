@@ -42,6 +42,7 @@ import com.clipcut.ui.caption.CaptionGeneratorActivity
 import com.clipcut.ui.components.Screen
 import com.clipcut.ui.components.SectionCard
 import com.clipcut.ui.deletion.DeletionActivity
+import com.clipcut.ui.gcprune.GcPruneActivity
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
 
@@ -100,6 +101,12 @@ fun HomeScreen(modifier: Modifier = Modifier, viewModel: HomeViewModel = hiltVie
                 body = "Write and enhance a caption with moods and hashtags, then copy it.",
                 status = "No clip needed",
                 onClick = { CaptionGeneratorActivity.start(context) },
+            )
+            FeatureCard(
+                title = "GC Prune",
+                body = "Find group-chat members who don't follow your main account, review them, and remove them safely.",
+                status = "Scan removes nobody",
+                onClick = { GcPruneActivity.start(context) },
             )
             FeatureCard(
                 title = "Trigger Deletion",

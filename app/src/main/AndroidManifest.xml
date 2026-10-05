@@ -43,6 +43,12 @@
             android:exported="false"
             android:theme="@style/Theme.ClipCut" />
 
+        <!-- GC Prune: scan a group chat, review, then remove members who don't follow the main account. -->
+        <activity
+            android:name=".ui.gcprune.GcPruneActivity"
+            android:exported="false"
+            android:theme="@style/Theme.ClipCut" />
+
         <!-- Caption and post-to-X flow, launched from LanBufferActivity after a successful export.
              Separate Activity so nothing in it can affect the export and marking flow. -->
         <activity
