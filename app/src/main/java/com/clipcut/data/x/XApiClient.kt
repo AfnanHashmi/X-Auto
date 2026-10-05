@@ -302,9 +302,9 @@ class XApiClient(
             .build()
     }
 
-    /** The signed-in account with its follower count. */
-    suspend fun getMeWithFollowers(): XReply = withContext(Dispatchers.IO) {
-        executeWithRate(signedGet("$API_X/users/me", mapOf("user.fields" to "public_metrics")))
+    /** The signed-in account (id, name, username) as the raw reply. */
+    suspend fun getMeReply(): XReply = withContext(Dispatchers.IO) {
+        executeWithRate(signedGet("$API_X/users/me", emptyMap()))
     }
 
     /** One group chat with its member and admin ids (X returns all of them in one reply). */
@@ -318,32 +318,19 @@ class XApiClient(
         )
     }
 
-    /** One page (up to 1000) of [userId]'s followers; pass the previous page's `next_token` as [paginationToken]. */
-    suspend fun getFollowersPage(userId: String, paginationToken: String?): XReply = withContext(Dispatchers.IO) {
-        requireNumericId(userId)
-        val params = buildMap {
-            put("max_results", "1000")
-            paginationToken?.let { put("pagination_token", it) }
-        }
-        executeWithRate(signedGet("$API_X/users/$userId/followers", params))
-    }
-
-    /** Profiles for up to 100 user ids. */
-    suspend fun getUsers(ids: List<String>): XReply = withContext(Dispatchers.IO) {
-        require(ids.isNotEmpty() && ids.size <= 100) { "1 to 100 ids per lookup" }
-        ids.forEach(::requireNumericId)
-        executeWithRate(signedGet("$API_X/users", mapOf("ids" to ids.joinToString(","))))
-    }
-
-    suspend fun getUserByUsername(username: String): XReply = withContext(Dispatchers.IO) {
-        require(Regex("^[A-Za-z0-9_]{1,15}$").matches(username)) { "Not an X handle: $username" }
-        executeWithRate(signedGet("$API_X/users/by/username/$username", emptyMap()))
-    }
-
-    /** [userId]'s relationship to the signed-in account (`connection_status`). */
-    suspend fun getConnectionStatus(userId: String): XReply = withContext(Dispatchers.IO) {
-        requireNumericId(userId)
-        executeWithRate(signedGet("$API_X/users/$userId", mapOf("user.fields" to "connection_status")))
+    /**
+     * Up to 100 accounts by @handle, each with `connection_status` (whether it follows the signed-in account).
+     * X rejects the WHOLE request if one handle is malformed, so every handle is checked here first.
+     */
+    suspend fun getUsersByUsernames(usernames: List<String>): XReply = withContext(Dispatchers.IO) {
+        require(usernames.isNotEmpty() && usernames.size <= 100) { "1 to 100 handles per lookup" }
+        usernames.forEach { require(HANDLE.matches(it)) { "Not an X handle: $it" } }
+        executeWithRate(
+            signedGet(
+                "$API_X/users/by",
+                mapOf("usernames" to usernames.joinToString(","), "user.fields" to "connection_status,name,username"),
+            ),
+        )
     }
 
     /**
@@ -367,6 +354,8 @@ class XApiClient(
     }
 
     private fun requireNumericId(id: String) = require(id.isNotEmpty() && id.length <= 19 && id.all { it.isDigit() }) { "Not a user id: $id" }
+
+    private val HANDLE = Regex("^[A-Za-z0-9_]{1,15}$")
 
     private fun requireChatId(id: String) = require(Regex("^g[0-9]{1,19}$").matches(id)) { "Not a group chat id: $id" }
 

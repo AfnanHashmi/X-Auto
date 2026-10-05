@@ -33,11 +33,11 @@ class WhitelistAndAuditTest {
         run.cap = 20
         run.delayMs = 5_000
         run.memberCount = 30
-        run.followersFetched = 24_000
-        run.followersReported = 24_027
+        run.followCheckTrusted = true
         val ana = AuditPerson("111", "ana", "Ana")
         val gone = AuditPerson("222", null, null)
-        run.candidates += ana
+        run.review += AuditRow("ana", "111", "ana", "Ana", "removable")
+        run.review += AuditRow("ghost_zz", null, null, null, "not found: no such user")
         run.removed += AuditEvent(ana, "removed", "removed from the group", 1_790_000_005_000)
         run.skipped += AuditEvent(gone, "skipped", "could not verify", 1_790_000_006_000)
         run.inFlight = AuditPerson("333", "bo", "Bo")
@@ -46,7 +46,9 @@ class WhitelistAndAuditTest {
         val json = JSONObject(run.toJson())
         assertEquals("g1", json.getString("group_id"))
         assertEquals("execute", json.getString("mode"))
-        assertEquals(24_027, json.getInt("followers_reported_by_x"))
+        assertTrue(json.getBoolean("follow_check_trusted"))
+        assertEquals("removable", json.getJSONArray("review").getJSONObject(0).getString("status"))
+        assertTrue(json.getJSONArray("review").getJSONObject(1).isNull("user_id"))
         assertEquals("111", json.getJSONArray("removed").getJSONObject(0).getString("user_id"))
         assertEquals("ana", json.getJSONArray("removed").getJSONObject(0).getString("handle"))
         assertTrue(json.getJSONArray("skipped").getJSONObject(0).isNull("handle"))

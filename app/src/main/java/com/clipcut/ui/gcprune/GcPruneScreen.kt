@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -30,14 +31,12 @@ import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import com.clipcut.domain.gcprune.AuditEvent
-import com.clipcut.domain.gcprune.Candidate
 import com.clipcut.domain.gcprune.ExecSettings
+import com.clipcut.domain.gcprune.LookupReady
+import com.clipcut.domain.gcprune.PrunePlanner
 import com.clipcut.domain.gcprune.RunReport
-import com.clipcut.domain.gcprune.ScanReady
-import com.clipcut.domain.gcprune.XPricing
 import com.clipcut.domain.gcprune.describe
 import com.clipcut.ui.components.Screen
 import com.clipcut.ui.components.SectionCard
@@ -58,13 +57,13 @@ fun GcPruneScreen(
 
     val view = LocalView.current
     DisposableEffect(state.phase) {
-        view.keepScreenOn = state.phase == GcPhase.REMOVING || state.phase == GcPhase.SCANNING
+        view.keepScreenOn = state.phase == GcPhase.REMOVING || state.phase == GcPhase.LOOKING_UP
         onDispose { view.keepScreenOn = false }
     }
 
     Screen(
         title = "GC Prune",
-        subtitle = state.scan?.let { "Group ${it.groupId}" } ?: "Remove group members who don't follow your main account",
+        subtitle = state.lookup?.let { "Group ${it.groupId}" } ?: "Remove the people you list from a group chat",
         modifier = modifier.imePadding(),
     ) {
         LazyColumn(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(14.dp)) {
@@ -73,17 +72,16 @@ fun GcPruneScreen(
                     item { InputStep(state, viewModel) }
                     item { WhitelistCard(state, viewModel) }
                 }
-                GcPhase.SCANNING, GcPhase.CONFIRM_COST -> item { ScanningStep(state, viewModel) }
+                GcPhase.LOOKING_UP -> item { LookingUpStep(viewModel) }
                 GcPhase.REVIEW -> {
-                    val scan = state.scan
-                    if (scan != null) {
-                        item { SummaryCard(scan) }
-                        item { RemovalCard(state, viewModel, scan) }
-                        item { Text("People who would be removed", style = MaterialTheme.typography.titleSmall) }
-                        if (scan.candidates.isEmpty()) {
-                            item { Text("Nobody. Everyone in this group follows you or is protected.", style = MaterialTheme.typography.bodyMedium) }
+                    val lookup = state.lookup
+                    if (lookup != null) {
+                        item { SummaryCard(lookup) }
+                        item { RemovalCard(state, viewModel, lookup) }
+                        item { Text("Your list", style = MaterialTheme.typography.titleSmall) }
+                        items(lookup.rows, key = { it.userId ?: ("name:" + it.requested) }) { r ->
+                            PersonRow(r, r.userId != null && r.userId in state.selected, viewModel)
                         }
-                        items(scan.candidates, key = { it.userId }) { c -> CandidateRow(c, c.userId in state.selected, viewModel) }
                         item { WhitelistCard(state, viewModel) }
                     }
                 }
@@ -95,7 +93,6 @@ fun GcPruneScreen(
     }
 
     if (state.confirmOpen) ConfirmDialog(state, viewModel)
-    if (state.phase == GcPhase.CONFIRM_COST) CostDialog(state, viewModel)
 }
 
 // -------------------------------------------------------------------------------------------------
@@ -103,11 +100,9 @@ fun GcPruneScreen(
 private fun InputStep(state: GcPruneUiState, vm: GcPruneViewModel) {
     Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
         WarningCard(
-            "A scan never removes anyone. It lists the members of the group who do not follow you so you can review them. " +
-                "Removal is a separate step that you have to switch on and confirm by typing the group id. " +
-                "You, group admins and anyone on the whitelist are never removed.\n\n" +
-                "Scanning reads every follower of your main account, which X bills per record. You will see the " +
-                "estimated cost and must approve it before anything is read.",
+            "Paste the usernames of the people to remove. A lookup never removes anyone: it shows who is in the group, " +
+                "who follows you and who is protected. Removal is a separate step that you have to switch on and confirm by " +
+                "typing the group id. You, group admins and anyone on the whitelist are never removed.",
         )
         SectionCard("Group chat") {
             OutlinedTextField(
@@ -117,56 +112,82 @@ private fun InputStep(state: GcPruneUiState, vm: GcPruneViewModel) {
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth(),
             )
-            state.message?.let { StatusRow(it, Tone.Bad) }
-            Button(onClick = vm::scan, enabled = state.link.isNotBlank(), modifier = Modifier.fillMaxWidth()) {
-                Text("Scan (removes nobody)")
+        }
+        SectionCard("People to remove") {
+            OutlinedTextField(
+                value = state.namesText,
+                onValueChange = vm::setNames,
+                label = { Text("Usernames") },
+                supportingText = { Text("One per line, or separated by spaces or commas. @name and x.com/name links are fine.") },
+                minLines = 5,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            if (state.namesText.isNotBlank()) {
+                Text("${state.parsed.valid.size} usernames understood", style = MaterialTheme.typography.bodySmall)
             }
+            if (state.parsed.invalid.isNotEmpty()) {
+                StatusRow("Not understood, so left out: " + state.parsed.invalid.joinToString(", "), Tone.Bad)
+            }
+            if (state.parsed.tooMany) {
+                StatusRow("That is more than ${com.clipcut.domain.gcprune.HandleList.MAX_NAMES} names. Do them in smaller lists.", Tone.Bad)
+            }
+            state.message?.let { StatusRow(it, Tone.Bad) }
+            Button(onClick = vm::lookUp, enabled = state.canLookUp, modifier = Modifier.fillMaxWidth()) {
+                val n = state.parsed.valid.size
+                Text(if (n > 0) "Look up $n people (about $" + "%.2f".format(state.lookupCostUsd) + ")" else "Look up (removes nobody)")
+            }
+            Text(
+                "X charges about 1 cent for each account looked up, plus one extra to check the follow answers can be trusted. " +
+                    "Nothing is removed in this step.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
     }
 }
 
 @Composable
-private fun ScanningStep(state: GcPruneUiState, vm: GcPruneViewModel) {
-    SectionCard("Scanning") {
+private fun LookingUpStep(vm: GcPruneViewModel) {
+    SectionCard("Looking up") {
         Row(verticalAlignment = Alignment.CenterVertically) {
             CircularProgressIndicator(modifier = Modifier.padding(end = 12.dp))
-            Text("Fetched ${state.followersFetched} followers…")
+            Text("Reading the group and the usernames…")
+        }
+        Text("Nothing is removed in this step.", style = MaterialTheme.typography.bodySmall)
+        OutlinedButton(onClick = vm::cancelLookup) { Text("Cancel") }
+    }
+}
+
+@Composable
+private fun SummaryCard(lookup: LookupReady) {
+    val rows = lookup.rows
+    val removable = rows.count { it.status is PrunePlanner.Status.Removable }
+    val follows = rows.count { it.status is PrunePlanner.Status.FollowsYou }
+    val others = rows.size - removable - follows
+    SectionCard("Lookup result") {
+        StatusRow("${lookup.memberCount} members in the group", Tone.Neutral)
+        StatusRow("$removable can be removed (in the group, not following @${lookup.mainHandle})", if (removable > 0) Tone.Neutral else Tone.Good)
+        if (follows > 0) StatusRow("$follows follow @${lookup.mainHandle}: not ticked, check they are the right people", Tone.Bad)
+        if (others > 0) StatusRow("$others cannot be removed (not in the group, protected or not found)", Tone.Neutral)
+        if (!lookup.followCheckTrusted) {
+            StatusRow(
+                "X did not confirm that a known follower follows you, so the follow warnings cannot be relied on. " +
+                    "Nobody is ticked: tick only people you are sure about.",
+                Tone.Bad,
+            )
         }
         Text(
-            if (state.phase == GcPhase.CONFIRM_COST) "Waiting for your approval. Nothing has been read yet." else "Reading the whole follower list. Nothing is removed in this step.",
+            "Removal would run as @${lookup.removerHandle}.",
             style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
-        OutlinedButton(onClick = vm::cancelScan) { Text("Cancel") }
+        lookup.auditLocation?.let { Text("Saved: $it", style = MaterialTheme.typography.bodySmall) }
+        lookup.auditWarning?.let { StatusRow(it, Tone.Bad) }
     }
 }
 
 @Composable
-private fun SummaryCard(scan: ScanReady) {
-    SectionCard("Scan result") {
-        StatusRow("${scan.memberCount} members in the group", Tone.Neutral)
-        StatusRow(
-            "${scan.followersFetched} of ${scan.followersReported} followers fetched for @${scan.mainHandle}",
-            Tone.Good,
-        )
-        StatusRow("${scan.candidates.size} do not follow and are not protected", if (scan.candidates.isEmpty()) Tone.Good else Tone.Neutral)
-        val e = scan.exempt
-        Text(
-            "Left alone: ${e.own} of your own accounts, ${e.admins} admins, ${e.whitelisted} whitelisted.",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        Text(
-            "Removal would run as @${scan.removerHandle}.",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        scan.auditLocation?.let { Text("Saved: $it", style = MaterialTheme.typography.bodySmall) }
-        scan.auditWarning?.let { StatusRow(it, Tone.Bad) }
-    }
-}
-
-@Composable
-private fun RemovalCard(state: GcPruneUiState, vm: GcPruneViewModel, scan: ScanReady) {
+private fun RemovalCard(state: GcPruneUiState, vm: GcPruneViewModel, lookup: LookupReady) {
     SectionCard("Removal") {
         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
             Column(modifier = Modifier.weight(1f)) {
@@ -205,12 +226,15 @@ private fun RemovalCard(state: GcPruneUiState, vm: GcPruneViewModel, scan: ScanR
             OutlinedTextField(
                 value = state.typedId,
                 onValueChange = vm::setTyped,
-                label = { Text("Type ${scan.groupId} to confirm") },
+                label = { Text("Type ${lookup.groupId} to confirm") },
                 singleLine = true,
                 textStyle = MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace),
                 modifier = Modifier.fillMaxWidth(),
             )
             Text("${state.selectedCount} ticked", style = MaterialTheme.typography.bodySmall)
+            if (state.tickedFollowers > 0) {
+                StatusRow("${state.tickedFollowers} of the ticked people follow @${lookup.mainHandle}.", Tone.Bad)
+            }
             Button(
                 onClick = vm::requestRemove,
                 enabled = state.canRemove,
@@ -229,23 +253,38 @@ private fun RemovalCard(state: GcPruneUiState, vm: GcPruneViewModel, scan: ScanR
     }
 }
 
+private fun statusLine(r: PrunePlanner.Row, mainHandle: String? = null): String = when (val s = r.status) {
+    PrunePlanner.Status.Removable -> "In the group, does not follow you"
+    PrunePlanner.Status.FollowsYou -> "⚠ Follows you" + (mainHandle?.let { " (@$it)" } ?: "")
+    PrunePlanner.Status.NotInGroup -> "Not in this group"
+    is PrunePlanner.Status.Protected -> "Protected: ${s.why}"
+    is PrunePlanner.Status.NotFound -> "Not found: ${s.reason}"
+}
+
 @Composable
-private fun CandidateRow(c: Candidate, selected: Boolean, vm: GcPruneViewModel) {
+private fun PersonRow(r: PrunePlanner.Row, selected: Boolean, vm: GcPruneViewModel) {
+    val dim = if (r.selectable) 1f else 0.5f
     Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-        Checkbox(checked = selected, onCheckedChange = { vm.toggle(c.userId) })
+        Checkbox(checked = selected && r.selectable, enabled = r.selectable, onCheckedChange = { r.userId?.let(vm::toggle) })
         Column(modifier = Modifier.weight(1f)) {
             Text(
-                c.handle?.let { "@$it" } ?: "(account unavailable)",
+                r.handle?.let { "@$it" } ?: r.requested,
                 style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = dim),
             )
             Text(
-                listOfNotNull(c.name, "id ${c.userId}").joinToString("  -  "),
+                listOfNotNull(r.name, r.userId?.let { "id $it" }).joinToString("  -  ").ifEmpty { " " },
                 style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = dim),
             )
-            Text(c.reason, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(
+                statusLine(r),
+                style = MaterialTheme.typography.bodySmall,
+                color = (if (r.status is PrunePlanner.Status.FollowsYou) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant)
+                    .copy(alpha = if (r.status is PrunePlanner.Status.FollowsYou) 1f else dim),
+            )
         }
-        TextButton(onClick = { vm.keep(c.userId) }) { Text("Keep") }
+        if (r.selectable) TextButton(onClick = { r.userId?.let(vm::keep) }) { Text("Keep") }
     }
 }
 
@@ -278,7 +317,7 @@ private fun DoneStep(state: GcPruneUiState, vm: GcPruneViewModel) {
             ReportLists(report)
             report.auditLocation?.let { Text("Audit file: $it", style = MaterialTheme.typography.bodySmall) }
         }
-        Button(onClick = vm::reset, modifier = Modifier.fillMaxWidth()) { Text("Back to start (scan again for a fresh list)") }
+        Button(onClick = vm::reset, modifier = Modifier.fillMaxWidth()) { Text("Back to start") }
     }
 }
 
@@ -323,37 +362,22 @@ private fun WhitelistCard(state: GcPruneUiState, vm: GcPruneViewModel) {
 }
 
 @Composable
-private fun CostDialog(state: GcPruneUiState, vm: GcPruneViewModel) {
-    val e = state.estimate ?: return
-    val cost = "%.2f".format(e.estimatedUsd)
-    AlertDialog(
-        onDismissRequest = vm::declineScan,
-        title = { Text("Approve the cost of this scan?") },
-        text = {
-            Text(
-                "Scanning reads all ${e.followers} followers of your main account. X charges about " +
-                    "${'$'}${XPricing.USER_READ_USD} for each record, so this scan will cost roughly ${'$'}$cost.\n\n" +
-                    "X bills each person once per UTC day (the day changes at 05:30 IST), so scanning again today costs far less. " +
-                    "Prices can change; X's usage page is the source of truth.\n\nNothing has been read yet.",
-            )
-        },
-        confirmButton = { TextButton(onClick = vm::confirmScan) { Text("Scan (about ${'$'}$cost)") } },
-        dismissButton = { TextButton(onClick = vm::declineScan) { Text("Cancel") } },
-    )
-}
-
-@Composable
 private fun ConfirmDialog(state: GcPruneUiState, vm: GcPruneViewModel) {
-    val scan = state.scan ?: return
+    val lookup = state.lookup ?: return
     val n = minOf(state.selectedCount, state.cap ?: 0)
+    val followers = if (state.tickedFollowers > 0) {
+        "\n\n⚠ ${state.tickedFollowers} of the ticked people FOLLOW @${lookup.mainHandle}. Cancel and untick them unless you mean it."
+    } else {
+        ""
+    }
     AlertDialog(
         onDismissRequest = vm::dismissConfirm,
         title = { Text("Remove up to $n people?") },
         text = {
             Text(
-                "@${scan.removerHandle} will remove up to $n of the ${state.selectedCount} ticked people from ${scan.groupId}, " +
-                    "one at a time, ${(state.delayMs ?: 0) / 1000} seconds apart. Each is checked again immediately before removal, " +
-                    "and the run stops at the first problem.\n\nThe app cannot undo this. Who was removed is saved in the audit file.",
+                "@${lookup.removerHandle} will remove up to $n of the ${state.selectedCount} ticked people from ${lookup.groupId}, " +
+                    "one at a time, ${(state.delayMs ?: 0) / 1000} seconds apart. Each is checked against a fresh read of the group first, " +
+                    "and the run stops at the first problem.\n\nThe app cannot undo this. Who was removed is saved in the audit file." + followers,
             )
         },
         confirmButton = {

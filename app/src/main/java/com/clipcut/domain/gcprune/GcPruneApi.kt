@@ -20,31 +20,26 @@ class GcApiException(
 
 /**
  * Everything the feature needs from X, in one seam so the whole safety logic can be tested against a
- * fake. The real one is [RealGcPruneApi]: followers and per-person checks are made as the MAIN account,
- * and the group is read and members are removed as RW (@rw_account).
+ * fake. The real one is [RealGcPruneApi]: handles are looked up as the MAIN account (so "follows me" means
+ * follows main), and the group is read and members are removed as RW (@rw_account).
  */
 interface GcPruneApi {
-    /** The account whose followers count: its id and how many followers X says it has. */
+    /** The account people must follow. */
     suspend fun mainAccount(): Reply<SelfInfo>
 
     /** The account that removes people, with its identity verified against the handle it is meant to be. */
     suspend fun removerAccount(): Reply<SelfInfo>
 
-    /** Ids of the user's other accounts (so none of them can ever be a candidate). */
+    /** Ids of the user's other accounts (so none of them can ever be removed). */
     suspend fun otherOwnAccountIds(): Set<String>
+
+    /** The @handle of an account that is known to follow the main account, used to prove the follow check works. */
+    suspend fun knownFollowerHandle(): String?
 
     suspend fun readGroup(groupId: String): Reply<GcConversation>
 
-    /** One page of the main account's followers, following [token] from the previous page. */
-    suspend fun followersPage(userId: String, token: String?): Reply<FollowersPage>
-
-    /** Profiles for up to 100 ids; accounts that no longer exist are simply missing from the result. */
-    suspend fun lookupUsers(ids: List<String>): Reply<List<GcUserInfo>>
-
-    suspend fun lookupHandle(handle: String): Reply<GcUserInfo?>
-
-    /** Does [userId] follow the main account right now? */
-    suspend fun followCheck(userId: String): Reply<FollowCheck>
+    /** Up to 100 handles at once, each answered exactly once (see [parseUsersByName]). */
+    suspend fun lookupHandles(handles: List<String>): Reply<List<NameLookup>>
 
     suspend fun removeMember(groupId: String, userId: String): Reply<RemoveOutcome>
 }

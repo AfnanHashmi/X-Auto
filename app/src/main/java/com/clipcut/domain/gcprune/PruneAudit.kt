@@ -13,6 +13,9 @@ interface AuditSink {
 /** A person the run considered, with what was known about them. */
 data class AuditPerson(val userId: String, val handle: String?, val name: String?)
 
+/** One pasted name and how it was classified, e.g. "removable", "follows you", "not in group". */
+data class AuditRow(val requested: String, val userId: String?, val handle: String?, val name: String?, val status: String)
+
 data class AuditEvent(val person: AuditPerson, val outcome: String, val detail: String, val atEpochMs: Long)
 
 /**
@@ -26,9 +29,10 @@ class AuditRun(
     val mode: String,
     val startedAtEpochMs: Long,
 ) {
-    var followersFetched: Int = 0
-    var followersReported: Int = 0
     var memberCount: Int = 0
+
+    /** False when the follow check could not be proven; nothing was pre-ticked in that case. */
+    var followCheckTrusted: Boolean? = null
     var cap: Int? = null
     var delayMs: Long? = null
     var stopReason: String? = null
@@ -37,7 +41,7 @@ class AuditRun(
     /** Set just BEFORE a removal request goes out and cleared after, so a kill mid-request leaves a trace. */
     var inFlight: AuditPerson? = null
 
-    val candidates = ArrayList<AuditPerson>()
+    val review = ArrayList<AuditRow>()
     val removed = ArrayList<AuditEvent>()
     val skipped = ArrayList<AuditEvent>()
     val failures = ArrayList<AuditEvent>()
@@ -46,6 +50,8 @@ class AuditRun(
 
     fun toJson(): String {
         fun person(p: AuditPerson) = JSONObject().put("user_id", p.userId).put("handle", p.handle ?: JSONObject.NULL).put("name", p.name ?: JSONObject.NULL)
+        fun row(r: AuditRow) = JSONObject().put("requested", r.requested).put("user_id", r.userId ?: JSONObject.NULL)
+            .put("handle", r.handle ?: JSONObject.NULL).put("name", r.name ?: JSONObject.NULL).put("status", r.status)
         fun event(e: AuditEvent) = person(e.person).put("outcome", e.outcome).put("detail", e.detail).put("at", Instant.ofEpochMilli(e.atEpochMs).toString())
         return JSONObject()
             .put("run_id", runId)
@@ -56,10 +62,9 @@ class AuditRun(
             .put("stop_reason", stopReason ?: JSONObject.NULL)
             .put("settings", JSONObject().put("cap", cap ?: JSONObject.NULL).put("delay_ms", delayMs ?: JSONObject.NULL))
             .put("member_count", memberCount)
-            .put("followers_fetched", followersFetched)
-            .put("followers_reported_by_x", followersReported)
+            .put("follow_check_trusted", followCheckTrusted ?: JSONObject.NULL)
             .put("in_flight", inFlight?.let(::person) ?: JSONObject.NULL)
-            .put("candidates", JSONArray(candidates.map(::person)))
+            .put("review", JSONArray(review.map(::row)))
             .put("removed", JSONArray(removed.map(::event)))
             .put("skipped", JSONArray(skipped.map(::event)))
             .put("failures", JSONArray(failures.map(::event)))

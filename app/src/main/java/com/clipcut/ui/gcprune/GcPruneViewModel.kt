@@ -3,12 +3,13 @@ package com.clipcut.ui.gcprune
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.clipcut.data.gcprune.WhitelistStore
-import com.clipcut.domain.gcprune.EstimateOutcome
 import com.clipcut.domain.gcprune.ExecSettings
 import com.clipcut.domain.gcprune.GcLink
 import com.clipcut.domain.gcprune.GcPruneApi
 import com.clipcut.domain.gcprune.GcPruneService
-import com.clipcut.domain.gcprune.ScanOutcome
+import com.clipcut.domain.gcprune.HandleList
+import com.clipcut.domain.gcprune.LookupOutcome
+import com.clipcut.domain.gcprune.PrunePlanner
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
@@ -20,7 +21,7 @@ import kotlinx.coroutines.launch
 import javax.inject.Inject
 
 /**
- * Drives the GC Prune screen: INPUT -> SCANNING -> REVIEW -> (REMOVING -> DONE). Removal can only start from
+ * Drives the GC Prune screen: INPUT -> LOOKING_UP -> REVIEW -> (REMOVING -> DONE). Removal can only start from
  * REVIEW, with removal switched on and the group id typed exactly; the service enforces the same again.
  */
 @HiltViewModel
@@ -49,7 +50,7 @@ class GcPruneViewModel @Inject constructor(
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                edit { copy(whitelistMessage = "The whitelist cannot be read (${e.message}). Scans refuse to run until it is fixed.") }
+                edit { copy(whitelistMessage = "The whitelist cannot be read (${e.message}). Lookups refuse to run until it is fixed.") }
             }
         }
     }
@@ -65,8 +66,13 @@ class GcPruneViewModel @Inject constructor(
                 val id = if (raw.all { it.isDigit() } && raw.length <= 19) {
                     raw
                 } else {
-                    api.lookupHandle(raw).value?.id ?: run {
-                        edit { copy(whitelistMessage = "No account found for $raw.") }
+                    val handle = HandleList.handleOf(raw)
+                    if (handle == null) {
+                        edit { copy(whitelistMessage = "That is not a user id or an @username.") }
+                        return@launch
+                    }
+                    api.lookupHandles(listOf(handle)).value.firstOrNull()?.found?.id ?: run {
+                        edit { copy(whitelistMessage = "No account found for @$handle.") }
                         return@launch
                     }
                 }
@@ -94,14 +100,18 @@ class GcPruneViewModel @Inject constructor(
         }
     }
 
-    /** Adds a person from the review list to the whitelist and takes them off the list for good. */
+    /** Whitelists a person from the review list: they stay on screen but are protected from now on. */
     fun keep(userId: String) {
         viewModelScope.launch {
             try {
                 whitelistStore.add(userId)
                 edit {
                     copy(
-                        scan = scan?.copy(candidates = scan.candidates.filter { it.userId != userId }),
+                        lookup = lookup?.copy(
+                            rows = lookup.rows.map {
+                                if (it.userId == userId) it.copy(status = PrunePlanner.Status.Protected("on your whitelist")) else it
+                            },
+                        ),
                         selected = selected - userId,
                     )
                 }
@@ -114,61 +124,50 @@ class GcPruneViewModel @Inject constructor(
         }
     }
 
-    // ---- scan --------------------------------------------------------------------------------------------
+    // ---- lookup ------------------------------------------------------------------------------------------
     fun setLink(v: String) = edit { copy(link = v, message = null) }
 
-    /** First step: work out what the scan will cost and ask. Nothing is read until the user approves. */
-    fun scan() {
-        if (_state.value.phase != GcPhase.INPUT) return
-        val id = GcLink.parseGroupId(_state.value.link)
+    fun setNames(v: String) = edit { copy(namesText = v, message = null) }
+
+    fun lookUp() {
+        val s = _state.value
+        if (s.phase != GcPhase.INPUT) return
+        val id = GcLink.parseGroupId(s.link)
         if (id == null) {
             edit { copy(message = "That is not a group chat link. Paste something like https://x.com/i/chat/g123 or the id starting with g.") }
             return
         }
+        if (s.parsed.valid.isEmpty()) {
+            edit { copy(message = "Paste at least one username first.") }
+            return
+        }
         edit {
             copy(
-                phase = GcPhase.SCANNING, message = null, followersFetched = 0, scan = null, report = null,
-                allowRemoval = false, typedId = "", confirmOpen = false, estimate = null, pendingGroupId = null,
+                phase = GcPhase.LOOKING_UP, message = null, lookup = null, report = null,
+                allowRemoval = false, typedId = "", confirmOpen = false,
             )
         }
         job = viewModelScope.launch {
-            when (val e = service.estimate()) {
-                is EstimateOutcome.Ready -> edit { copy(phase = GcPhase.CONFIRM_COST, estimate = e.estimate, pendingGroupId = id) }
-                is EstimateOutcome.Failed -> edit { copy(phase = GcPhase.INPUT, message = e.reason) }
+            when (val out = service.lookup(id, s.namesText)) {
+                is LookupOutcome.Ready ->
+                    edit { copy(phase = GcPhase.REVIEW, lookup = out.lookup, selected = out.lookup.defaultSelection()) }
+                is LookupOutcome.Aborted -> edit { copy(phase = GcPhase.INPUT, message = out.reason) }
             }
         }
     }
 
-    fun declineScan() {
-        if (_state.value.phase != GcPhase.CONFIRM_COST) return
-        edit { copy(phase = GcPhase.INPUT, estimate = null, pendingGroupId = null, message = "Scan not started. Nothing was read or removed.") }
-    }
-
-    /** Second step, only after the cost was approved: the real scan. */
-    fun confirmScan() {
-        val s = _state.value
-        val id = s.pendingGroupId ?: return
-        if (s.phase != GcPhase.CONFIRM_COST) return
-        edit { copy(phase = GcPhase.SCANNING, followersFetched = 0) }
-        job = viewModelScope.launch {
-            when (val out = service.scan(id) { n -> edit { copy(followersFetched = n) } }) {
-                is ScanOutcome.Ready ->
-                    edit { copy(phase = GcPhase.REVIEW, scan = out.scan, selected = out.scan.candidates.map { it.userId }.toSet(), estimate = null) }
-                is ScanOutcome.Aborted -> edit { copy(phase = GcPhase.INPUT, message = out.reason, estimate = null) }
-            }
-        }
-    }
-
-    fun cancelScan() {
-        if (_state.value.phase != GcPhase.SCANNING) return
+    fun cancelLookup() {
+        if (_state.value.phase != GcPhase.LOOKING_UP) return
         job?.cancel()
-        edit { copy(phase = GcPhase.INPUT, message = "Scan cancelled. Nothing was removed.") }
+        edit { copy(phase = GcPhase.INPUT, message = "Lookup cancelled. Nothing was removed.") }
     }
 
     // ---- review ---------------------------------------------------------------------------------------------
     fun toggle(userId: String) = edit { copy(selected = if (userId in selected) selected - userId else selected + userId) }
 
-    fun selectAll(on: Boolean) = edit { copy(selected = if (on) scan?.candidates?.map { it.userId }?.toSet().orEmpty() else emptySet()) }
+    /** Ticks every person who can be removed, or clears all ticks. */
+    fun selectAll(on: Boolean) =
+        edit { copy(selected = if (on) lookup?.rows?.filter { it.selectable }?.mapNotNull { it.userId }?.toSet().orEmpty() else emptySet()) }
 
     // ---- removal ----------------------------------------------------------------------------------------------
     fun setAllowRemoval(on: Boolean) = edit { copy(allowRemoval = on, typedId = if (on) typedId else "") }
@@ -187,13 +186,13 @@ class GcPruneViewModel @Inject constructor(
 
     fun confirmRemove() {
         val s = _state.value
-        val scan = s.scan ?: return
+        val lookup = s.lookup ?: return
         val cap = s.cap ?: return
         val delayMs = s.delayMs ?: return
         if (!s.canRemove) return
         edit { copy(confirmOpen = false, phase = GcPhase.REMOVING, report = null) }
         job = viewModelScope.launch {
-            val report = service.execute(scan, s.selected, s.typedId, ExecSettings(cap, delayMs)) { r -> edit { copy(report = r) } }
+            val report = service.execute(lookup, s.selected, s.typedId, ExecSettings(cap, delayMs)) { r -> edit { copy(report = r) } }
             edit { copy(phase = GcPhase.DONE, report = report, allowRemoval = false, typedId = "") }
         }
     }

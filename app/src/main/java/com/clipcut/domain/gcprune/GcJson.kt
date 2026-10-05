@@ -9,24 +9,15 @@ class GcParseException(message: String) : Exception(message)
 
 private val NUMERIC_ID = Regex("^[0-9]{1,19}$")
 
-data class SelfInfo(val id: String, val username: String, val followersCount: Int?)
+data class SelfInfo(val id: String, val username: String)
 
 data class GcConversation(val id: String, val type: String, val memberIds: List<String>, val adminIds: List<String>)
 
-data class FollowersPage(val ids: List<String>, val nextToken: String?)
+/** An account found by @handle. [followsMain] is true only when X positively said `followed_by`. */
+data class FoundUser(val id: String, val username: String, val name: String, val followsMain: Boolean)
 
-data class GcUserInfo(val id: String, val username: String, val name: String)
-
-/**
- * The per-person "do they follow me" answer. X leaves `connection_status` OUT for someone with no
- * relationship (measured: followers return ["followed_by"], strangers return no field at all), so
- * "does not follow" is only accepted when the person was positively found and X reported no error.
- */
-sealed interface FollowCheck {
-    data object Follows : FollowCheck
-    data object NotFollowing : FollowCheck
-    data class Unverifiable(val reason: String) : FollowCheck
-}
+/** The answer for one handle that was asked about: found, or not found with X's reason. */
+data class NameLookup(val requested: String, val found: FoundUser?, val notFoundReason: String?)
 
 sealed interface RemoveOutcome {
     data object Removed : RemoveOutcome
@@ -62,8 +53,7 @@ fun parseSelf(body: String): SelfInfo {
     val data = root.optJSONObject("data") ?: throw GcParseException("The reply has no account")
     val id = data.optString("id")
     if (!NUMERIC_ID.matches(id)) throw GcParseException("The account has no valid id")
-    val followers = data.optJSONObject("public_metrics")?.takeIf { it.has("followers_count") }?.optInt("followers_count")
-    return SelfInfo(id, data.optString("username"), followers)
+    return SelfInfo(id, data.optString("username"))
 }
 
 /** One chat group. The id must echo [expectedId], so a reply about some other conversation is never used. */
@@ -82,58 +72,40 @@ fun parseConversation(body: String, expectedId: String): GcConversation {
 }
 
 /**
- * One page of followers. A page with no `data` is only an end-of-list if X says it holds zero results;
- * anything else missing is an error, because a short list is how real followers get flagged.
+ * The answer to "who are these @handles". Every handle asked about comes back exactly once: found (with
+ * whether it follows the main account, from `connection_status`, which X leaves OUT for strangers), or not
+ * found with X's reason. Anything unexplained fails the whole lookup: an answer about an account nobody asked
+ * about, an error that names none of the handles, or an id that is not a number.
  */
-fun parseFollowersPage(body: String): FollowersPage {
+fun parseUsersByName(body: String, requested: List<String>): List<NameLookup> {
     val root = obj(body)
-    failOnErrors(root)
-    val meta = root.optJSONObject("meta") ?: throw GcParseException("The follower page has no meta")
-    if (!meta.has("result_count")) throw GcParseException("The follower page does not say how many results it holds")
-    val data = root.optJSONArray("data")
-    val ids = if (data == null) {
-        if (meta.optInt("result_count") != 0) throw GcParseException("The follower page says it has results but sent none")
-        emptyList()
-    } else {
-        List(data.length()) { i ->
-            val id = data.optJSONObject(i)?.optString("id").orEmpty()
-            if (!NUMERIC_ID.matches(id)) throw GcParseException("A follower entry has no valid id")
-            id
+    val byLower = requested.associateBy { it.lowercase() }
+    val found = HashMap<String, FoundUser>()
+    val missing = HashMap<String, String>()
+
+    root.optJSONArray("data")?.let { data ->
+        for (i in 0 until data.length()) {
+            val u = data.optJSONObject(i) ?: throw GcParseException("X sent a user entry that could not be read")
+            val username = u.optString("username")
+            val asked = byLower[username.lowercase()] ?: throw GcParseException("X answered about an account that was not asked about")
+            val id = u.optString("id")
+            if (!NUMERIC_ID.matches(id)) throw GcParseException("An account has no valid id")
+            val status = u.optJSONArray("connection_status")
+            val follows = status != null && (0 until status.length()).any { status.optString(it) == "followed_by" }
+            found[asked] = FoundUser(id, username, u.optString("name"), follows)
         }
     }
-    if (ids.size != meta.optInt("result_count", -1)) throw GcParseException("The follower page is shorter than it claims")
-    return FollowersPage(ids, meta.optString("next_token").takeIf { it.isNotBlank() })
-}
-
-/** Users that exist. An account that was deleted or suspended is simply absent, which is not an error. */
-fun parseUsers(body: String): List<GcUserInfo> {
-    val root = obj(body)
-    val data = root.optJSONArray("data") ?: return emptyList()
-    return List(data.length()) { i ->
-        val u = data.getJSONObject(i)
-        GcUserInfo(u.optString("id"), u.optString("username"), u.optString("name"))
-    }.filter { NUMERIC_ID.matches(it.id) }
-}
-
-fun parseSingleUser(body: String): GcUserInfo? {
-    val root = obj(body)
-    val u = root.optJSONObject("data") ?: return null
-    return GcUserInfo(u.optString("id"), u.optString("username"), u.optString("name")).takeIf { NUMERIC_ID.matches(it.id) }
-}
-
-fun parseFollowCheck(body: String, userId: String): FollowCheck {
-    val root = try {
-        obj(body)
-    } catch (e: GcParseException) {
-        return FollowCheck.Unverifiable(e.message.orEmpty())
+    root.optJSONArray("errors")?.let { errors ->
+        for (i in 0 until errors.length()) {
+            val e = errors.optJSONObject(i) ?: throw GcParseException("X sent an error that could not be read")
+            val named = listOf(e.optString("value"), e.optString("resource_id")).firstNotNullOfOrNull { byLower[it.lowercase()] }
+                ?: throw GcParseException("X reported an error: ${e.optString("detail").ifBlank { e.optString("title") }}")
+            missing[named] = e.optString("detail").ifBlank { e.optString("title") }.ifBlank { "X could not find this account" }
+        }
     }
-    val errors = root.optJSONArray("errors")
-    if (errors != null && errors.length() > 0) return FollowCheck.Unverifiable("X reported an error for this account")
-    val data = root.optJSONObject("data") ?: return FollowCheck.Unverifiable("X returned no such account")
-    if (data.optString("id") != userId) return FollowCheck.Unverifiable("X answered about a different account")
-    val status = data.optJSONArray("connection_status")
-    val followedBy = status != null && (0 until status.length()).any { status.optString(it) == "followed_by" }
-    return if (followedBy) FollowCheck.Follows else FollowCheck.NotFollowing
+    return requested.map { name ->
+        NameLookup(name, found[name], if (name in found) null else missing[name] ?: "X gave no answer for this name")
+    }
 }
 
 fun parseRemoveResponse(body: String): RemoveOutcome {

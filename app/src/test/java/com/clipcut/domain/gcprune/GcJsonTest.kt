@@ -1,6 +1,7 @@
 package com.clipcut.domain.gcprune
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
@@ -48,78 +49,73 @@ class GcJsonTest {
         }
     }
 
-    // ---- followers ---------------------------------------------------------------------------------
+    // ---- looking up @handles ---------------------------------------------------------------------------------
+    private val ana = """{"id":"1","username":"Ana","name":"Ana A","connection_status":["followed_by"]}"""
+    private val bo = """{"id":"2","username":"bo","name":"Bo B"}"""
+
     @Test
-    fun readsAFollowerPageAndItsNextToken() {
-        val p = parseFollowersPage("""{"data":[{"id":"1"},{"id":"2"}],"meta":{"result_count":2,"next_token":"abc"}}""")
-        assertEquals(listOf("1", "2"), p.ids)
-        assertEquals("abc", p.nextToken)
+    fun aFoundAccountWithFollowedByFollowsYou() {
+        val r = parseUsersByName("""{"data":[$ana]}""", listOf("ana"))
+        assertEquals(FoundUser("1", "Ana", "Ana A", followsMain = true), r.single().found)
+        assertEquals("ana", r.single().requested) // keyed by what was asked, whatever the capitalisation
     }
 
     @Test
-    fun theLastPageHasNoNextToken() {
-        val p = parseFollowersPage("""{"data":[{"id":"1"}],"meta":{"result_count":1}}""")
-        assertNull(p.nextToken)
-    }
-
-    @Test
-    fun anEmptyEndOfListIsOnlyAcceptedWhenXSaysZero() {
-        assertTrue(parseFollowersPage("""{"meta":{"result_count":0}}""").ids.isEmpty())
-        assertThrows(GcParseException::class.java) { parseFollowersPage("""{"meta":{"result_count":5}}""") }
-        assertThrows(GcParseException::class.java) { parseFollowersPage("""{}""") }
-    }
-
-    @Test
-    fun aPageShorterThanItClaimsIsRejectedBecauseAShortListFlagsRealFollowers() {
-        assertThrows(GcParseException::class.java) {
-            parseFollowersPage("""{"data":[{"id":"1"}],"meta":{"result_count":3}}""")
-        }
-    }
-
-    @Test
-    fun aFollowerPageWithErrorsOrBadIdsIsRejected() {
-        assertThrows(GcParseException::class.java) {
-            parseFollowersPage("""{"data":[{"id":"1"}],"meta":{"result_count":1},"errors":[{"title":"x"}]}""")
-        }
-        assertThrows(GcParseException::class.java) {
-            parseFollowersPage("""{"data":[{"id":"x1"}],"meta":{"result_count":1}}""")
-        }
-        assertThrows(GcParseException::class.java) { parseFollowersPage("not json") }
-    }
-
-    // ---- profiles ----------------------------------------------------------------------------------
-    @Test
-    fun missingAccountsAreSimplyAbsentFromALookup() {
-        val users = parseUsers("""{"data":[{"id":"1","username":"a","name":"A"}],"errors":[{"title":"Not Found Error"}]}""")
-        assertEquals(listOf(GcUserInfo("1", "a", "A")), users)
-        assertTrue(parseUsers("""{"errors":[{"title":"Not Found Error"}]}""").isEmpty())
-    }
-
-    // ---- the per-person follow check ---------------------------------------------------------------------
-    @Test
-    fun followedByMeansTheyFollow() {
-        val body = """{"data":{"id":"7","connection_status":["followed_by"]}}"""
-        assertEquals(FollowCheck.Follows, parseFollowCheck(body, "7"))
-        assertEquals(
-            FollowCheck.Follows,
-            parseFollowCheck("""{"data":{"id":"7","connection_status":["following","followed_by"]}}""", "7"),
-        )
-    }
-
-    @Test
-    fun anAbsentFieldIsHowXReportsAStrangerAndCountsAsNotFollowing() {
+    fun anAbsentConnectionStatusIsHowXReportsAStrangerAndCountsAsNotFollowing() {
         // Measured against the real API: a non-follower comes back with no connection_status at all.
-        assertEquals(FollowCheck.NotFollowing, parseFollowCheck("""{"data":{"id":"7","name":"x"}}""", "7"))
-        assertEquals(FollowCheck.NotFollowing, parseFollowCheck("""{"data":{"id":"7","connection_status":["following"]}}""", "7"))
+        assertFalse(parseUsersByName("""{"data":[$bo]}""", listOf("bo")).single().found!!.followsMain)
+        val following = """{"data":[{"id":"2","username":"bo","name":"B","connection_status":["following"]}]}"""
+        assertFalse(parseUsersByName(following, listOf("bo")).single().found!!.followsMain)
     }
 
     @Test
-    fun anythingXDidNotPositivelyAnswerIsUnverifiableNeverNotFollowing() {
-        assertTrue(parseFollowCheck("""{"errors":[{"title":"Not Found Error"}]}""", "7") is FollowCheck.Unverifiable)
-        assertTrue(parseFollowCheck("""{"data":{"id":"8"}}""", "7") is FollowCheck.Unverifiable) // someone else
-        assertTrue(parseFollowCheck("""{"data":{"id":"7"},"errors":[{"title":"x"}]}""", "7") is FollowCheck.Unverifiable)
-        assertTrue(parseFollowCheck("garbage", "7") is FollowCheck.Unverifiable)
-        assertTrue(parseFollowCheck("{}", "7") is FollowCheck.Unverifiable)
+    fun everyNameAskedAboutComesBackOnceInTheOrderAsked() {
+        val body = """{"data":[$bo,$ana]}"""
+        assertEquals(listOf("ana", "bo"), parseUsersByName(body, listOf("ana", "bo")).map { it.requested })
+        assertEquals(listOf("1", "2"), parseUsersByName(body, listOf("ana", "bo")).map { it.found!!.id })
+    }
+
+    @Test
+    fun aNameXCouldNotFindComesBackNotFoundWithXsReason() {
+        val body = """{"data":[$ana],"errors":[{"detail":"Could not find user with usernames: [ghost].","value":"ghost","resource_id":"ghost","title":"Not Found Error"}]}"""
+        val r = parseUsersByName(body, listOf("ana", "ghost"))
+        assertNull(r[1].found)
+        assertTrue(r[1].notFoundReason!!.contains("Could not find"))
+        assertTrue(r[0].found != null)
+    }
+
+    @Test
+    fun everyNameCanBeNotFoundWithNoDataAtAll() {
+        val body = """{"errors":[{"detail":"d","value":"a","title":"Not Found Error"},{"detail":"d","value":"b","title":"Not Found Error"}]}"""
+        assertTrue(parseUsersByName(body, listOf("a", "b")).all { it.found == null })
+    }
+
+    @Test
+    fun aNameXSaidNothingAboutIsNotFoundNeverGuessed() {
+        val r = parseUsersByName("""{"data":[$ana]}""", listOf("ana", "silent"))
+        assertNull(r[1].found)
+        assertTrue(r[1].notFoundReason!!.contains("no answer"))
+    }
+
+    @Test
+    fun anAnswerAboutAnAccountNobodyAskedAboutFailsTheWholeLookup() {
+        assertThrows(GcParseException::class.java) { parseUsersByName("""{"data":[$bo]}""", listOf("ana")) }
+    }
+
+    @Test
+    fun anErrorThatNamesNoneOfTheAskedHandlesFailsTheWholeLookup() {
+        assertThrows(GcParseException::class.java) {
+            parseUsersByName("""{"data":[$ana],"errors":[{"title":"Forbidden","detail":"nope"}]}""", listOf("ana"))
+        }
+        assertThrows(GcParseException::class.java) { parseUsersByName("""{"errors":[{"title":"Unauthorized"}]}""", listOf("ana")) }
+    }
+
+    @Test
+    fun anAccountWithoutAValidIdOrGarbageFailsTheLookup() {
+        assertThrows(GcParseException::class.java) {
+            parseUsersByName("""{"data":[{"id":"abc","username":"ana","name":"A"}]}""", listOf("ana"))
+        }
+        assertThrows(GcParseException::class.java) { parseUsersByName("not json", listOf("ana")) }
     }
 
     // ---- the removal reply ----------------------------------------------------------------------------------
@@ -135,9 +131,13 @@ class GcJsonTest {
 
     // ---- own account -------------------------------------------------------------------------------------------
     @Test
-    fun readsAnAccountAndItsFollowerCount() {
-        val me = parseSelf("""{"data":{"id":"5","username":"me","public_metrics":{"followers_count":24027}}}""")
-        assertEquals(SelfInfo("5", "me", 24027), me)
-        assertNull(parseSelf("""{"data":{"id":"5","username":"me"}}""").followersCount)
+    fun readsAnAccount() {
+        assertEquals(SelfInfo("5", "me"), parseSelf("""{"data":{"id":"5","username":"me"}}"""))
+    }
+
+    @Test
+    fun anAccountWithoutAValidIdIsRejected() {
+        assertThrows(GcParseException::class.java) { parseSelf("""{"data":{"id":"x","username":"me"}}""") }
+        assertThrows(GcParseException::class.java) { parseSelf("""{"errors":[{"title":"x"}]}""") }
     }
 }

@@ -12,7 +12,7 @@ import javax.inject.Named
 
 /**
  * [GcPruneApi] over the real X API. Who does what:
- *  - the MAIN account's keys read its followers and answer "does this person follow me";
+ *  - the MAIN account's keys look the handles up and say which of them follow it;
  *  - RW's keys (@rw_account) read the group and remove members, because RW is the group's admin.
  * Keys come from BuildConfig (local.properties) via the existing clients and are never logged.
  */
@@ -39,10 +39,10 @@ class RealGcPruneApi @Inject constructor(
         return Reply(parse(reply.body), rate(reply.rateLimit))
     }
 
-    override suspend fun mainAccount(): Reply<SelfInfo> = guarded({ main.getMeWithFollowers() }, ::parseSelf)
+    override suspend fun mainAccount(): Reply<SelfInfo> = guarded({ main.getMeReply() }, ::parseSelf)
 
     override suspend fun removerAccount(): Reply<SelfInfo> {
-        val reply = guarded({ remover.getMeWithFollowers() }, ::parseSelf)
+        val reply = guarded({ remover.getMeReply() }, ::parseSelf)
         // The keys must belong to the account that is meant to be removing people.
         check(reply.value.username.equals(MediaAccount.RW.handle, ignoreCase = true)) {
             "The RW keys belong to @${reply.value.username}, not @${MediaAccount.RW.handle}"
@@ -53,28 +53,27 @@ class RealGcPruneApi @Inject constructor(
 
     override suspend fun otherOwnAccountIds(): Set<String> =
         MediaAccount.entries.filter { it != MediaAccount.RW && it.isConfigured }.map { account ->
-            guarded({ media.clientFor(account).getMeWithFollowers() }, ::parseSelf).value.id
+            guarded({ media.clientFor(account).getMeReply() }, ::parseSelf).value.id
         }.toSet()
 
     override suspend fun readGroup(groupId: String): Reply<GcConversation> =
         guarded({ remover.getChatConversation(groupId) }) { parseConversation(it, groupId) }
 
-    override suspend fun followersPage(userId: String, token: String?): Reply<FollowersPage> =
-        guarded({ main.getFollowersPage(userId, token) }, ::parseFollowersPage)
+    override suspend fun knownFollowerHandle(): String? =
+        MediaAccount.DK.takeIf { it.isConfigured }?.handle
 
-    override suspend fun lookupUsers(ids: List<String>): Reply<List<GcUserInfo>> =
-        guarded({ main.getUsers(ids) }, ::parseUsers)
-
-    override suspend fun lookupHandle(handle: String): Reply<GcUserInfo?> =
-        guarded({ main.getUserByUsername(handle.trim().trimStart('@')) }, ::parseSingleUser)
-
-    override suspend fun followCheck(userId: String): Reply<FollowCheck> =
-        guarded({ main.getConnectionStatus(userId) }) { parseFollowCheck(it, userId) }
+    override suspend fun lookupHandles(handles: List<String>): Reply<List<NameLookup>> =
+        guarded({ main.getUsersByUsernames(handles) }) { parseUsersByName(it, handles) }
 
     override suspend fun removeMember(groupId: String, userId: String): Reply<RemoveOutcome> {
         // Passing the remover's own id would make it LEAVE the group; refuse that here, whatever the caller asked.
         val self = removerId ?: removerAccount().value.id
-        check(userId != self) { "Refusing to remove the account that is doing the removing" }
+        requireNotRemover(userId, self)
         return guarded({ remover.removeChatMembers(groupId, listOf(userId)) }, ::parseRemoveResponse)
     }
+}
+
+/** Passing the remover's own id to X makes it LEAVE the group, so it must never reach the request. */
+internal fun requireNotRemover(userId: String, removerId: String) {
+    check(userId != removerId) { "Refusing to remove the account that is doing the removing" }
 }

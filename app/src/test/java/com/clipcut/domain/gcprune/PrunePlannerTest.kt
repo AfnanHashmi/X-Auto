@@ -2,127 +2,98 @@ package com.clipcut.domain.gcprune
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class PrunePlannerTest {
-    private val members = (1..20).map { it.toString() }
+    private val members = setOf("1", "2", "3", "4", "ME", "ADMIN", "DK")
+    private val admins = setOf("ME", "ADMIN")
+    private val own = setOf("ME", "DK", "MAIN")
 
-    private fun input(
-        members: List<String> = this.members,
-        admins: Set<String> = emptySet(),
-        followers: Set<String> = (1..15).map { it.toString() }.toSet(),
-        reported: Int = followers.size,
-        own: Set<String> = emptySet(),
-        whitelist: Set<String> = emptySet(),
-    ) = PrunePlanner.Input(members, admins, followers, reported, own, whitelist)
+    private fun found(id: String, handle: String = "h$id", follows: Boolean = false) =
+        NameLookup(handle, FoundUser(id, handle, "Name $id", follows), null)
 
-    private fun ready(i: PrunePlanner.Input) = PrunePlanner.plan(i) as PrunePlanner.Result.Ready
+    private fun classify(lookups: List<NameLookup>, whitelist: Set<String> = emptySet()) =
+        PrunePlanner.classify(lookups, members, admins, own, whitelist)
+
+    private fun List<PrunePlanner.Row>.of(id: String) = first { it.userId == id }.status
 
     @Test
-    fun candidatesAreExactlyTheMembersWhoDoNotFollow() {
-        assertEquals(listOf("16", "17", "18", "19", "20"), ready(input()).candidates)
+    fun aMemberWhoDoesNotFollowIsRemovable() {
+        assertEquals(PrunePlanner.Status.Removable, classify(listOf(found("1"))).of("1"))
     }
 
     @Test
-    fun aFollowerIsNeverACandidate() {
-        val r = ready(input(followers = (1..20).map { it.toString() }.toSet()))
-        assertTrue(r.candidates.isEmpty())
+    fun aMemberWhoFollowsIsFlaggedNotRemovable() {
+        assertEquals(PrunePlanner.Status.FollowsYou, classify(listOf(found("1", follows = true))).of("1"))
     }
 
     @Test
-    fun youAreNeverACandidateEvenIfYouDoNotFollowYourself() {
-        val r = ready(input(own = setOf("16", "99")))
-        assertFalse("16" in r.candidates)
-        assertEquals(1, r.exempt.own)
+    fun aFoundAccountOutsideTheGroupCannotBeRemoved() {
+        val row = classify(listOf(found("99"))).single()
+        assertEquals(PrunePlanner.Status.NotInGroup, row.status)
+        assertFalse(row.selectable)
     }
 
     @Test
-    fun adminsAreNeverCandidates() {
-        val r = ready(input(admins = setOf("17", "18")))
-        assertFalse("17" in r.candidates || "18" in r.candidates)
-        assertEquals(2, r.exempt.admins)
+    fun anAccountXCouldNotFindHasNoIdAndCannotBeRemoved() {
+        val row = classify(listOf(NameLookup("ghost", null, "no such user"))).single()
+        assertNull(row.userId)
+        assertTrue(row.status is PrunePlanner.Status.NotFound)
+        assertFalse(row.selectable)
     }
 
     @Test
-    fun whitelistedPeopleAreNeverCandidates() {
-        val r = ready(input(whitelist = setOf("19")))
-        assertFalse("19" in r.candidates)
-        assertEquals(1, r.exempt.whitelisted)
+    fun ownAccountsAdminsAndTheWhitelistAreProtectedWhetherOrNotTheyFollow() {
+        val rows = classify(
+            listOf(found("ME"), found("DK", follows = true), found("ADMIN"), found("2", follows = true), found("3")),
+            whitelist = setOf("2", "3"),
+        )
+        assertEquals(PrunePlanner.Status.Protected("one of your own accounts"), rows.of("ME"))
+        assertEquals(PrunePlanner.Status.Protected("one of your own accounts"), rows.of("DK"))
+        assertEquals(PrunePlanner.Status.Protected("a group admin"), rows.of("ADMIN"))
+        assertEquals(PrunePlanner.Status.Protected("on your whitelist"), rows.of("2"))
+        assertEquals(PrunePlanner.Status.Protected("on your whitelist"), rows.of("3"))
+        assertTrue(rows.none { it.selectable })
     }
 
     @Test
-    fun theProtectionsStackWithoutDoubleCounting() {
-        val r = ready(input(own = setOf("16"), admins = setOf("16", "17"), whitelist = setOf("17", "18")))
-        assertEquals(listOf("19", "20"), r.candidates)
-        // 16 is own and an admin (counted once, as own); 17 is an admin and whitelisted (counted once, as an admin); 18 is whitelisted.
-        assertEquals(PrunePlanner.Exempt(own = 1, admins = 1, whitelisted = 1), r.exempt)
+    fun protectionWinsOverNotBeingInTheGroup() {
+        // Your own account is protected even when it is not in this group, so it can never read as removable.
+        assertEquals(PrunePlanner.Status.Protected("one of your own accounts"), classify(listOf(found("MAIN"))).of("MAIN"))
     }
 
     @Test
-    fun aDuplicatedMemberIsOnlyConsideredOnce() {
-        val r = ready(input(members = members + listOf("20", "20")))
-        assertEquals(1, r.candidates.count { it == "20" })
+    fun twoNamesForTheSameAccountGiveOneRow() {
+        val rows = classify(listOf(found("1", "old_name"), found("1", "new_name")))
+        assertEquals(1, rows.size)
+        assertEquals("old_name", rows.single().requested)
     }
 
     @Test
-    fun anEmptyGroupAborts() {
-        assertTrue(PrunePlanner.plan(input(members = emptyList())) is PrunePlanner.Result.Abort)
-    }
-
-    // ---- fail closed ----------------------------------------------------------------------------------------
-    @Test
-    fun aFollowerListThatFallsShortOfWhatXReportsAborts() {
-        // 15 fetched against 100 reported: a partial list would wrongly flag real followers.
-        val r = PrunePlanner.plan(input(reported = 100))
-        assertTrue(r is PrunePlanner.Result.Abort)
+    fun rowsKeepTheOrderTheNamesWerePasted() {
+        val rows = classify(listOf(found("3"), NameLookup("ghost", null, "x"), found("1")))
+        assertEquals(listOf("h3", "ghost", "h1"), rows.map { it.requested })
     }
 
     @Test
-    fun theCoverageThresholdIsNinetySevenPercentOfWhatXReports() {
-        val followers = (1..97).map { "f$it" }.toSet() + (1..15).map { it.toString() }
-        // 112 fetched. Reported 115 -> 97.4%: allowed. Reported 116 -> 96.6%: aborts.
-        assertTrue(PrunePlanner.plan(input(followers = followers, reported = 115)) is PrunePlanner.Result.Ready)
-        assertTrue(PrunePlanner.plan(input(followers = followers, reported = 116)) is PrunePlanner.Result.Abort)
+    fun onlyRemovableAndFollowsYouRowsCanBeTicked() {
+        val rows = classify(listOf(found("1"), found("2", follows = true), found("99"), found("ADMIN")))
+        assertEquals(listOf("1", "2"), rows.filter { it.selectable }.mapNotNull { it.userId })
     }
 
     @Test
-    fun anEmptyFollowerListAbortsWhenXReportsFollowers() {
-        assertTrue(PrunePlanner.plan(input(followers = emptySet(), reported = 500)) is PrunePlanner.Result.Abort)
+    fun isProtectedCoversEachKind() {
+        assertTrue(PrunePlanner.isProtected("ME", admins, own, emptySet()))
+        assertTrue(PrunePlanner.isProtected("ADMIN", admins, own, emptySet()))
+        assertTrue(PrunePlanner.isProtected("7", admins, own, setOf("7")))
+        assertFalse(PrunePlanner.isProtected("1", admins, own, setOf("7")))
     }
 
     @Test
-    fun aReportedCountOfZeroAborts() {
-        assertTrue(PrunePlanner.plan(input(reported = 0)) is PrunePlanner.Result.Abort)
-    }
-
-    @Test
-    fun overHalfOfTheGroupFlaggedAborts() {
-        // 5 followers of 20 members -> 15 candidates (75%).
-        val r = PrunePlanner.plan(input(followers = (1..5).map { it.toString() }.toSet()))
-        assertTrue(r is PrunePlanner.Result.Abort)
-    }
-
-    @Test
-    fun exactlyHalfIsStillAllowedButOneMoreIsNot() {
-        // 10 followers of 20 -> 10 candidates (exactly 50%): allowed.
-        assertTrue(PrunePlanner.plan(input(followers = (1..10).map { it.toString() }.toSet())) is PrunePlanner.Result.Ready)
-        // 9 followers -> 11 candidates (55%): aborts.
-        assertTrue(PrunePlanner.plan(input(followers = (1..9).map { it.toString() }.toSet())) is PrunePlanner.Result.Abort)
-    }
-
-    @Test
-    fun exemptPeopleDoNotCountTowardsTheHalfLimit() {
-        // 10 followers; 10 non-followers of which 6 are admins -> only 4 candidates.
-        val r = ready(input(followers = (1..10).map { it.toString() }.toSet(), admins = (11..16).map { it.toString() }.toSet()))
-        assertEquals(4, r.candidates.size)
-    }
-
-    @Test
-    fun isProtectedCoversEveryKindOfExemption() {
-        assertTrue(PrunePlanner.isProtected("1", admins = setOf("1"), ownIds = emptySet(), whitelist = emptySet()))
-        assertTrue(PrunePlanner.isProtected("1", admins = emptySet(), ownIds = setOf("1"), whitelist = emptySet()))
-        assertTrue(PrunePlanner.isProtected("1", admins = emptySet(), ownIds = emptySet(), whitelist = setOf("1")))
-        assertFalse(PrunePlanner.isProtected("1", admins = setOf("2"), ownIds = setOf("3"), whitelist = setOf("4")))
+    fun theAccountDoingTheRemovingCanNeverBeTheOneRemoved() {
+        org.junit.Assert.assertThrows(IllegalStateException::class.java) { requireNotRemover("9000", "9000") }
+        requireNotRemover("19", "9000") // anyone else is fine
     }
 }
