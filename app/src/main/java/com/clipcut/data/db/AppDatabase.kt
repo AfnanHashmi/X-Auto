@@ -7,7 +7,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
 
 @Database(
     entities = [CaptionTemplate::class, UndoEntry::class, ClipRecord::class, DeletedPost::class, Unfollow::class],
-    version = 11,
+    version = 12,
     exportSchema = true,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -107,6 +107,20 @@ abstract class AppDatabase : RoomDatabase() {
                         "`followingCount` INTEGER, `receivedAtEpochMs` INTEGER NOT NULL, " +
                         "`fetchedAtEpochMs` INTEGER NOT NULL, PRIMARY KEY(`eventUuid`))",
                 )
+            }
+        }
+
+        /**
+         * Adds what the group-chat automation did about each unfollow. Rows already stored count as "not tracked"
+         * with version 0, so the next fetch (which asks for everything after version 0) replaces them with the real state.
+         */
+        val MIGRATION_11_12 = object : Migration(11, 12) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE unfollows ADD COLUMN gcStatus TEXT NOT NULL DEFAULT 'not_tracked'")
+                db.execSQL("ALTER TABLE unfollows ADD COLUMN gcDetail TEXT")
+                db.execSQL("ALTER TABLE unfollows ADD COLUMN gcDueAtEpochMs INTEGER")
+                db.execSQL("ALTER TABLE unfollows ADD COLUMN gcUpdatedAtEpochMs INTEGER")
+                db.execSQL("ALTER TABLE unfollows ADD COLUMN version INTEGER NOT NULL DEFAULT 0")
             }
         }
     }

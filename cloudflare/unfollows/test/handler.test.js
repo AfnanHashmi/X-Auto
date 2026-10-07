@@ -1,56 +1,15 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createHmac } from "node:crypto";
-import { readFileSync } from "node:fs";
-import { DatabaseSync } from "node:sqlite";
-import worker, { handleMark, handleRead, handleWebhookPost } from "../src/index.js";
+import worker, { handleMark, handleRead, handleResume, handleSettings, handleWebhookPost, handleWhitelist } from "../src/index.js";
 import { MAIN, unfollowEvent } from "./fixture.js";
-
-const SECRET = "consumer-secret-for-tests";
-const APP_TOKEN = "app-token-for-tests";
-const NOW = new Date("2026-10-07T10:00:00Z");
-
-/** Cloudflare D1's API over an in-memory SQLite, running the real schema.sql. */
-function fakeD1() {
-  const db = new DatabaseSync(":memory:");
-  db.exec(readFileSync(new URL("../schema.sql", import.meta.url), "utf8"));
-  return {
-    prepare(sql) {
-      const exec = (args) => ({
-        run: async () => ({ meta: { changes: Number(db.prepare(sql).run(...args).changes) } }),
-        first: async () => db.prepare(sql).get(...args) ?? null,
-        all: async () => ({ results: db.prepare(sql).all(...args) }),
-      });
-      return { ...exec([]), bind: (...args) => exec(args) };
-    },
-    raw: db,
-  };
-}
-
-function setup(over = {}) {
-  const DB = fakeD1();
-  const calls = [];
-  const fetchImpl = async (url, init) => {
-    calls.push({ url, method: init?.method });
-    return { ok: true, status: 200 };
-  };
-  const env = { DB, CONSUMER_SECRET: SECRET, BEARER: "bearer", APP_TOKEN, MAIN_USER_ID: MAIN, DAILY_CAP: "300", SUBSCRIPTION_ID: "sub1", ...over };
-  return { DB, env, calls, fetchImpl };
-}
-
-const sig = (body) => "sha256=" + createHmac("sha256", SECRET).update(body).digest("base64");
-const post = (body, headers = {}) => new Request("https://w/x/webhook", { method: "POST", body, headers });
-const signed = (obj) => {
-  const body = JSON.stringify(obj);
-  return post(body, { "x-twitter-webhooks-signature": sig(body) });
-};
-const count = (DB) => DB.raw.prepare("SELECT COUNT(*) AS n FROM events").get().n;
-const state = (DB, k) => DB.raw.prepare("SELECT value FROM state WHERE key = ?").get(k)?.value ?? null;
+import { APP_TOKEN, NOW, SECRET, authed, count, kickRow, post, setup, sig, signed, state } from "./helpers.js";
 
 test("a signed unfollow is stored once, however many times X delivers it", async () => {
   const { DB, env, fetchImpl } = setup();
   for (let i = 0; i < 3; i++) assert.equal((await handleWebhookPost(signed(unfollowEvent()), env, NOW, fetchImpl)).status, 200);
   assert.equal(count(DB), 1);
+  assert.equal(DB.raw.prepare("SELECT COUNT(*) AS n FROM kicks").get().n, 1);
   assert.equal(state(DB, "count:2026-10-07"), "1");
   assert.equal(state(DB, "last_event_at"), NOW.toISOString());
 });
@@ -62,6 +21,7 @@ test("an unsigned, wrongly signed or tampered POST is rejected and stores nothin
   assert.equal((await handleWebhookPost(post(body, { "x-twitter-webhooks-signature": "sha256=AAAA" }), env, NOW, fetchImpl)).status, 401);
   assert.equal((await handleWebhookPost(post(body + " ", { "x-twitter-webhooks-signature": sig(body) }), env, NOW, fetchImpl)).status, 401);
   assert.equal(count(DB), 0);
+  assert.equal(DB.raw.prepare("SELECT COUNT(*) AS n FROM kicks").get().n, 0);
   assert.equal(state(DB, "rejected_signature"), "3");
 });
 
@@ -119,12 +79,38 @@ test("an unrecognised body is counted but does not pause tracking", async () => 
   assert.equal(state(DB, "unrecognised_bodies"), "1");
 });
 
+// ---- the follow-up row ----------------------------------------------------------------------------------
+test("each new unfollow gets a pending kick due after the configured delay", async () => {
+  const { DB, env, fetchImpl } = setup();
+  await handleWebhookPost(signed(unfollowEvent({ uuid: "u1" })), env, NOW, fetchImpl);
+  const k = kickRow(DB, "u1");
+  assert.equal(k.status, "pending");
+  assert.equal(k.due_at, new Date(NOW.getTime() + 30 * 60 * 1000).toISOString());
+  assert.equal(k.user_id, "1111111111111111111");
+});
+
+test("a re-delivered event does not create or reset a kick", async () => {
+  const { DB, env, fetchImpl } = setup();
+  await handleWebhookPost(signed(unfollowEvent({ uuid: "u1" })), env, NOW, fetchImpl);
+  DB.raw.prepare("UPDATE kicks SET status = 'kicked' WHERE event_uuid = 'u1'").run();
+  await handleWebhookPost(signed(unfollowEvent({ uuid: "u1" })), env, new Date(NOW.getTime() + 60000), fetchImpl);
+  assert.equal(kickRow(DB, "u1").status, "kicked");
+});
+
+test("with the automation off, the follow-up is recorded as skipped, never pending", async () => {
+  const { DB, env, fetchImpl } = setup();
+  await handleSettings(authed("/settings", { method: "POST", body: JSON.stringify({ mode: "off" }) }), env);
+  await handleWebhookPost(signed(unfollowEvent({ uuid: "u1" })), env, NOW, fetchImpl);
+  assert.equal(kickRow(DB, "u1").status, "skipped");
+});
+
+// ---- reading -----------------------------------------------------------------------------------------------------
 test("reading needs the app token", async () => {
   const { env } = setup();
   for (const h of [{}, { authorization: "Bearer nope" }, { authorization: APP_TOKEN }]) {
     assert.equal((await handleRead(new Request("https://w/unfollows", { headers: h }), env, NOW)).status, 401);
   }
-  assert.equal((await handleRead(new Request("https://w/unfollows", { headers: { authorization: `Bearer ${APP_TOKEN}` } }), env, NOW)).status, 200);
+  assert.equal((await handleRead(authed("/unfollows"), env, NOW)).status, 200);
 });
 
 test("reading with no token configured is refused, never open", async () => {
@@ -132,26 +118,73 @@ test("reading with no token configured is refused, never open", async () => {
   assert.equal((await handleRead(new Request("https://w/unfollows", { headers: { authorization: "Bearer " } }), env, NOW)).status, 401);
 });
 
-test("reading returns events after a sequence number, in order, with a status block", async () => {
-  const { env, fetchImpl } = setup();
+test("reading returns what changed after a version, in change order, with the group follow-up and a status block", async () => {
+  const { DB, env, fetchImpl } = setup();
   for (const [u, id] of [["a", "1"], ["b", "2"], ["c", "3"]]) await handleWebhookPost(signed(unfollowEvent({ uuid: u, sourceId: id, username: `user${id}` })), env, NOW, fetchImpl);
-  const get = (after) => handleRead(new Request(`https://w/unfollows?after=${after}`, { headers: { authorization: `Bearer ${APP_TOKEN}` } }), env, NOW).then((r) => r.json());
+  const get = (since) => handleRead(authed(`/unfollows?since_version=${since}`), env, NOW).then((r) => r.json());
   const all = await get(0);
   assert.deepEqual(all.events.map((e) => e.username), ["user1", "user2", "user3"]);
-  const rest = await get(all.events[0].seq);
+  assert.equal(all.events[0].gc_status, "pending");
+  const rest = await get(all.events[0].version);
   assert.deepEqual(rest.events.map((e) => e.username), ["user2", "user3"]);
+
+  // A later change to the first row shows up again, after the others.
+  DB.raw.prepare("UPDATE kicks SET status = 'kicked', version = 99 WHERE event_uuid = 'a'").run();
+  const changed = await get(3);
+  assert.deepEqual(changed.events.map((e) => [e.username, e.gc_status]), [["user1", "kicked"]]);
+
   assert.equal(all.status.total_events, 3);
   assert.equal(all.status.today_count, 3);
+  assert.equal(all.status.automation.mode, "dry_run");
+  assert.equal(all.status.automation.pending, 3);
+  assert.equal(all.status.automation.kick_cap, 20);
   assert.equal(all.status.paused_reason, null);
   assert.equal((await get("garbage")).events.length, 3);
 });
 
 test("tracking_since is set once and never moves", async () => {
   const { env } = setup();
-  const mark = (t) => handleMark(new Request("https://w/mark", { method: "POST", headers: { authorization: `Bearer ${APP_TOKEN}` } }), env, t).then((r) => r.json());
+  const mark = (t) => handleMark(authed("/mark", { method: "POST" }), env, t).then((r) => r.json());
   assert.equal((await mark(new Date("2026-10-07T10:00:00Z"))).tracking_since, "2026-10-07T10:00:00.000Z");
   assert.equal((await mark(new Date("2026-10-09T10:00:00Z"))).tracking_since, "2026-10-07T10:00:00.000Z");
   assert.equal((await handleMark(new Request("https://w/mark", { method: "POST" }), env, NOW)).status, 401);
+});
+
+test("the schema backfills a row for unfollows stored before the automation existed", async () => {
+  const { DB } = setup();
+  DB.raw.prepare("INSERT INTO events (event_uuid, user_id, username, name, followers_count, following_count, received_at) VALUES ('old', '5', 'x', 'X', 1, 1, '2026-10-07T07:56:39.877Z')").run();
+  DB.raw.exec(await import("node:fs").then((fs) => fs.readFileSync(new URL("../schema.sql", import.meta.url), "utf8")));
+  assert.equal(kickRow(DB, "old").status, "not_tracked");
+});
+
+// ---- settings, resume, whitelist ----------------------------------------------------------------------------------
+test("the mode can only be off, dry_run or live, and only with the token", async () => {
+  const { DB, env } = setup();
+  const put = (mode, headers) => handleSettings(new Request("https://w/settings", { method: "POST", body: JSON.stringify({ mode }), headers }), env);
+  assert.equal((await put("live", {})).status, 401);
+  assert.equal((await put("yolo", { authorization: `Bearer ${APP_TOKEN}` })).status, 400);
+  assert.equal((await put("live", { authorization: `Bearer ${APP_TOKEN}` })).status, 200);
+  assert.equal(state(DB, "mode"), "live");
+});
+
+test("resume clears an automation pause and needs the token", async () => {
+  const { DB, env } = setup();
+  DB.raw.prepare("INSERT INTO state(key, value) VALUES('auto_paused_reason', 'x')").run();
+  assert.equal((await handleResume(new Request("https://w/resume", { method: "POST" }), env)).status, 401);
+  assert.equal(state(DB, "auto_paused_reason"), "x");
+  assert.equal((await handleResume(authed("/resume", { method: "POST" }), env)).status, 200);
+  assert.equal(state(DB, "auto_paused_reason"), null);
+});
+
+test("the whitelist can be added to and removed from, with a numeric id only", async () => {
+  const { DB, env } = setup();
+  const wl = (body) => handleWhitelist(authed("/whitelist", { method: "POST", body: JSON.stringify(body) }), env);
+  assert.equal((await wl({ user_id: "abc" })).status, 400);
+  assert.equal((await wl({ user_id: "42" })).status, 200);
+  assert.equal(DB.raw.prepare("SELECT COUNT(*) AS n FROM whitelist").get().n, 1);
+  assert.equal((await wl({ user_id: "42", keep: false })).status, 200);
+  assert.equal(DB.raw.prepare("SELECT COUNT(*) AS n FROM whitelist").get().n, 0);
+  assert.equal((await handleWhitelist(new Request("https://w/whitelist", { method: "POST", body: "{}" }), env)).status, 401);
 });
 
 test("the CRC endpoint answers GET, and unknown paths are 404", async () => {

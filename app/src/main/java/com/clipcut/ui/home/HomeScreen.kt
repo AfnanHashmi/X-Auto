@@ -34,6 +34,11 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.compose.runtime.collectAsState
+import com.clipcut.data.db.UnfollowDao
+import com.clipcut.domain.unfollows.UnfollowSummary
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.map
 import com.clipcut.data.x.BbLogsCounter
 import com.clipcut.data.x.MediaAccountSelector
 import com.clipcut.domain.api.MediaAccount
@@ -50,7 +55,11 @@ import javax.inject.Inject
 class HomeViewModel @Inject constructor(
     private val counter: BbLogsCounter,
     private val selector: MediaAccountSelector,
+    unfollowDao: UnfollowDao,
 ) : ViewModel() {
+    /** Today's unfollows and group kicks, live from the local log, for the Unfollowers card. */
+    val unfollowSummary: Flow<UnfollowSummary> = unfollowDao.observeAll().map { UnfollowSummary.of(it) }
+
     /** The media account that clips are posted to and that Trigger Deletion cleans up. */
     val active: MediaAccount get() = selector.active
 
@@ -68,6 +77,7 @@ fun HomeScreen(modifier: Modifier = Modifier, viewModel: HomeViewModel = hiltVie
     // Re-read on every return to this screen: posting a clip or changing the schedule happens elsewhere.
     var caption by remember { mutableStateOf(viewModel.nextCaption()) }
     var active by remember { mutableStateOf(viewModel.active) }
+    val summary by viewModel.unfollowSummary.collectAsState(initial = UnfollowSummary.EMPTY)
     val lifecycleOwner = LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
@@ -102,12 +112,7 @@ fun HomeScreen(modifier: Modifier = Modifier, viewModel: HomeViewModel = hiltVie
                 status = "No clip needed",
                 onClick = { CaptionGeneratorActivity.start(context) },
             )
-            FeatureCard(
-                title = "Unfollowers",
-                body = "See who unfollowed your main account, with the time, as X reports it.",
-                status = "Main account only",
-                onClick = { UnfollowsActivity.start(context) },
-            )
+            UnfollowersCard(summary = summary, onClick = { UnfollowsActivity.start(context) })
             FeatureCard(
                 title = "Trigger Deletion",
                 body = "Review and delete the media account's posts from a chosen time period.",
@@ -155,6 +160,54 @@ private fun AccountSwitcher(active: MediaAccount, onSelect: (MediaAccount) -> Un
                 color = MaterialTheme.colorScheme.error,
             )
         }
+    }
+}
+
+/**
+ * The Unfollowers card. It shows today's two numbers at a glance and tints itself when someone was kicked out of the
+ * group chat today (live) or would have been (dry run).
+ */
+@Composable
+private fun UnfollowersCard(summary: UnfollowSummary, onClick: () -> Unit) {
+    val kicked = summary.kickedToday > 0
+    val container = if (kicked) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surface
+    Card(onClick = onClick, modifier = Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = container)) {
+        Column(modifier = Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text("Unfollowers", style = MaterialTheme.typography.titleLarge)
+            Text(
+                "See who unfollowed your main account, and who was kicked out of the group chat because of it.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.padding(top = 4.dp)) {
+                CountPill("${summary.unfollowedToday} unfollowed today", MaterialTheme.colorScheme.secondary)
+                CountPill(
+                    "${summary.kickedToday} kicked from group",
+                    if (kicked) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            if (summary.wouldKickToday > 0) {
+                Text(
+                    "${summary.wouldKickToday} would be kicked (dry run)",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.tertiary,
+                )
+            }
+            if (summary.waiting > 0) {
+                Text(
+                    "${summary.waiting} waiting for their re-check",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun CountPill(text: String, color: Color) {
+    Surface(color = color.copy(alpha = 0.14f), shape = CircleShape) {
+        Text(text, style = MaterialTheme.typography.labelLarge, color = color, modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp))
     }
 }
 

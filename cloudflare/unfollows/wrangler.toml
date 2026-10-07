@@ -9,6 +9,17 @@ DAILY_CAP = "300"
 # Filled in after the subscription is created, so the kill-switch can delete it.
 SUBSCRIPTION_ID = "YOUR_SUBSCRIPTION_ID"
 
+# The group-chat automation: someone who unfollows main and is in this group is removed by RW after a delay, if they
+# still do not follow. The mode (off / dry_run / live) lives in the database and is switched from the app; it starts as dry_run.
+GC_GROUP_ID = "YOUR_GROUP_CHAT_ID"
+RW_USER_ID = "YOUR_RW_USER_ID"
+DK_USER_ID = "YOUR_DK_USER_ID"
+KICK_DELAY_MIN = "30"
+KICK_DAILY_CAP = "20"
+
+[triggers]
+crons = ["*/5 * * * *"]
+
 # Created with: wrangler d1 create x-auto-unfollows   (then paste the database_id here)
 [[d1_databases]]
 binding = "DB"
@@ -19,3 +30,7 @@ database_id = "YOUR_D1_DATABASE_ID"
 #   CONSUMER_SECRET  the X app's API secret, used for the CRC check and POST signatures
 #   BEARER           the X app's app-only Bearer token, used to delete the subscription (kill-switch)
 #   APP_TOKEN        a long random string the phone sends to read the list
+#   X_RW_CONSUMER_KEY, X_RW_CONSUMER_SECRET, X_RW_ACCESS_TOKEN, X_RW_ACCESS_SECRET
+#                    RW (@rw_account): reads the group and removes members
+#   X_MAIN_CONSUMER_KEY, X_MAIN_ACCESS_TOKEN, X_MAIN_ACCESS_SECRET
+#                    main (@main_account): re-checks whether someone follows (its consumer secret is CONSUMER_SECRET)
