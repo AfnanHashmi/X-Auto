@@ -45,15 +45,8 @@ class XApiException(message: String, val httpCode: Int? = null, val rateLimit: X
 
 data class XDeleteResult(val deleted: Boolean, val rateLimit: XRateLimit)
 
-/** A successful reply: the body text and the rate-limit headers that came with it. */
-data class XReply(val body: String, val rateLimit: XRateLimit)
-
 private const val UPLOAD_BASE = "https://upload.twitter.com/1.1/media/upload.json"
 private const val API_BASE = "https://api.twitter.com/2"
-
-// The host the X Chat endpoints were verified against. It is part of the OAuth 1.0a signature, so a request is
-// signed for exactly the host it is sent to.
-private const val API_X = "https://api.x.com/2"
 private const val CHUNK_SIZE = 4 * 1024 * 1024 // 4MB, under X's 5MB-per-chunk recommendation.
 private const val STATUS_POLL_MS = 1000L
 private const val MAX_STATUS_POLLS = 60
@@ -284,88 +277,6 @@ class XApiClient(
         } catch (e: XApiException) {
             if (e.httpCode == 404) false else throw e
         }
-    }
-
-    // ---------------------------------------------------------------------------------------------
-    // Group chats and followers. These return the raw reply body: parsing and judging it is the job of
-    // domain/gcprune, where it can be tested without a network.
-    // ---------------------------------------------------------------------------------------------
-
-    /** Signed GET to [baseUrl] whose query [params] are signed AND sent in the same encoding. */
-    private fun signedGet(baseUrl: String, params: Map<String, String>): Request {
-        val url = baseUrl.toHttpUrl().newBuilder().apply {
-            params.forEach { (k, v) -> addEncodedQueryParameter(OAuth1aSigner.percentEncode(k), OAuth1aSigner.percentEncode(v)) }
-        }.build()
-        return Request.Builder().url(url)
-            .header("Authorization", signer.authorizationHeader("GET", baseUrl, params))
-            .get()
-            .build()
-    }
-
-    /** The signed-in account (id, name, username) as the raw reply. */
-    suspend fun getMeReply(): XReply = withContext(Dispatchers.IO) {
-        executeWithRate(signedGet("$API_X/users/me", emptyMap()))
-    }
-
-    /** One group chat with its member and admin ids (X returns all of them in one reply). */
-    suspend fun getChatConversation(groupId: String): XReply = withContext(Dispatchers.IO) {
-        requireChatId(groupId)
-        executeWithRate(
-            signedGet(
-                "$API_X/chat/conversations/$groupId",
-                mapOf("expansions" to "member_ids,admin_ids", "chat_conversation.fields" to "type"),
-            ),
-        )
-    }
-
-    /**
-     * Up to 100 accounts by @handle, each with `connection_status` (whether it follows the signed-in account).
-     * X rejects the WHOLE request if one handle is malformed, so every handle is checked here first.
-     */
-    suspend fun getUsersByUsernames(usernames: List<String>): XReply = withContext(Dispatchers.IO) {
-        require(usernames.isNotEmpty() && usernames.size <= 100) { "1 to 100 handles per lookup" }
-        usernames.forEach { require(HANDLE.matches(it)) { "Not an X handle: $it" } }
-        executeWithRate(
-            signedGet(
-                "$API_X/users/by",
-                mapOf("usernames" to usernames.joinToString(","), "user.fields" to "connection_status,name,username"),
-            ),
-        )
-    }
-
-    /**
-     * Removes [userIds] from a group chat. Sent without `action_signatures`: producing one needs X Chat's
-     * encryption keys, which this app does not hold, and a signature is never faked. If X insists on one it
-     * says so and the caller stops. Passing the signed-in account's own id would make it LEAVE the group,
-     * so callers must never include it.
-     */
-    suspend fun removeChatMembers(groupId: String, userIds: List<String>): XReply = withContext(Dispatchers.IO) {
-        requireChatId(groupId)
-        require(userIds.isNotEmpty()) { "No one to remove" }
-        userIds.forEach(::requireNumericId)
-        val url = "$API_X/chat/conversations/$groupId/members/remove"
-        val json = JSONObject().put("user_ids", JSONArray(userIds))
-        val request = Request.Builder().url(url)
-            .header("Authorization", signer.authorizationHeader("POST", url))
-            .header("Content-Type", "application/json")
-            .post(json.toString().toRequestBody("application/json".toMediaType()))
-            .build()
-        executeWithRate(request)
-    }
-
-    private fun requireNumericId(id: String) = require(id.isNotEmpty() && id.length <= 19 && id.all { it.isDigit() }) { "Not a user id: $id" }
-
-    private val HANDLE = Regex("^[A-Za-z0-9_]{1,15}$")
-
-    private fun requireChatId(id: String) = require(Regex("^g[0-9]{1,19}$").matches(id)) { "Not a group chat id: $id" }
-
-    private fun executeWithRate(request: Request): XReply = okHttpClient.newCall(request).execute().use { response ->
-        val bodyText = response.body?.string().orEmpty()
-        val rate = XRateLimit.from { response.header(it) }
-        if (!response.isSuccessful) {
-            throw XApiException("${request.method} ${request.url.encodedPath} failed: HTTP ${response.code}: $bodyText", response.code, rate)
-        }
-        XReply(bodyText, rate)
     }
 
     private fun formBody(params: Map<String, String>) =

@@ -43,12 +43,6 @@
             android:exported="false"
             android:theme="@style/Theme.ClipCut" />
 
-        <!-- GC Prune: scan a group chat, review, then remove members who don't follow the main account. -->
-        <activity
-            android:name=".ui.gcprune.GcPruneActivity"
-            android:exported="false"
-            android:theme="@style/Theme.ClipCut" />
-
         <!-- Unfollowers: reads the tracker and lists who unfollowed the main account. -->
         <activity
             android:name=".ui.unfollows.UnfollowsActivity"
