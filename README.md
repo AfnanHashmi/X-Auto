@@ -1,7 +1,7 @@
 # X Auto
 
 A personal Android app for running the Bigg Boss clip-and-post workflow and the X accounts around it.
-Home screen features: **Clip Cut**, **Caption Generator**, **Trigger Deletion**, **GC Prune**.
+Home screen features: **Clip Cut**, **Caption Generator**, **Trigger Deletion**, **GC Prune**, **Unfollowers**.
 
 API keys are read from `local.properties` (git-ignored) and compiled into the debug build. They are never
 hard-coded and never logged. Build and install with `./gradlew :app:installDebug`; run the tests with
@@ -94,10 +94,9 @@ figure is its own arithmetic from the published price, and X's usage page is the
 ### Known limits
 
 - **Encrypted chats and `action_signatures`.** X's remove-members endpoint accepts optional cryptographic
-  signatures for encrypted chats. Producing one needs X's Chat encryption keys, which this app does not hold, and
-  it never fakes one. The request is sent without. If X rejects it for lacking a signature, the run stops, nobody
-  has been removed, and the screen says so. **Do the first live run with a single person** (cap 1) and confirm the
-  group still works afterwards.
+  signatures for encrypted chats. This app does not hold X's Chat encryption keys and never fakes a signature, so
+  it sends the request without one. In a live run on 2026-10-05 X accepted three removals this way. If X ever
+  starts requiring a signature, the run stops with nobody further removed and the screen says so.
 - **Names are taken as written.** Pasting `Ana Smith` (a display name) is read as two usernames, `Ana` and
   `Smith`, and each is looked up. They are only removed if they are in the group, not protected, and you leave
   them ticked, so read the review table: it shows the name, handle and id of everyone.
@@ -107,3 +106,62 @@ figure is its own arithmetic from the published price, and X's usage page is the
 
 `domain/gcprune/` (logic and the X seam), `data/gcprune/` (whitelist and audit storage), `ui/gcprune/` (screen).
 The safety logic is covered by tests in `app/src/test/java/com/clipcut/domain/gcprune/`, run against a fake X.
+
+---
+
+## Unfollowers: who unfollowed your main account
+
+Shows who unfollowed @main_account and when, as X reports it. It only knows about unfollows from the moment
+tracking started; X offers no way to look back.
+
+### How it works
+
+X's Activity API sends a `follow.unfollow` event each time someone unfollows the account. X can only *push* these
+events (to a public HTTPS address, or to a connection that is already open), and it refuses to replay history on a
+pay-per-use plan (`start_time` and `backfill_minutes` are rejected), so the app cannot ask for "the last 24 hours" on
+tap. A small always-on receiver is therefore needed. It is a **Cloudflare Worker** (free tier) in
+`cloudflare/unfollows/`:
+
+```
+X --webhook (HTTPS)--> Cloudflare Worker --stores--> D1 database <--reads (HTTPS, token)-- the app
+```
+
+- The Worker answers X's challenge check, verifies the signature on every delivery, stores each unfollow once
+  (de-duplicated on X's `event_uuid`), and serves the list to the app.
+- The X secrets live only in Cloudflare. The app holds just the Worker's address and a read token.
+- **Safety:** if an event ever arrives that is not "someone unfollowed the tracked account", or more than 300 events
+  arrive in one UTC day, the Worker deletes the X subscription itself, records why, and the app shows
+  "Tracking is paused". That stops X billing further events.
+
+### Cost
+
+X charges **$0.01 per unfollow event delivered**. Setting up, reading the list, and the Worker itself cost nothing
+(Cloudflare free tier). Reading the list from the app does not cost anything on X. Set a monthly spending limit in the
+X developer console as a hard ceiling.
+
+### Setup (already done for the main account)
+
+1. `cd cloudflare/unfollows && npm install && npx wrangler login`
+2. `npx wrangler d1 create x-auto-unfollows`, put the id in `wrangler.toml`, then
+   `npx wrangler d1 execute x-auto-unfollows --remote --file=schema.sql` and `npx wrangler deploy`.
+3. Set three secrets with `npx wrangler secret put`: `CONSUMER_SECRET` (the X app's API secret), `BEARER` (its app-only
+   token) and `APP_TOKEN` (any long random string).
+4. Register the webhook and create the subscription with the app's keys: `POST /2/webhooks` with
+   `https://<worker>/x/webhook`, then `POST /2/activity/subscriptions` with
+   `{"event_type":"follow.unfollow","filter":{"user_id":"<main id>","qualifiers":{"direction":"inbound"}},"webhook_id":"<id>"}`.
+   The `inbound` qualifier matters: without it you are also billed for people *you* unfollow.
+5. Put `UNFOLLOW_URL` and `UNFOLLOW_TOKEN` (the same string as `APP_TOKEN`) in `local.properties` and rebuild.
+
+### Known limits
+
+- **Gaps.** While the Worker or X's delivery is down, unfollows may be missed. X's webhook replay can re-send up to the
+  last 24 hours; it is not wired in yet.
+- **No follow date.** X does not say when the person started following, so that is not shown.
+- **Re-follows are not tracked** (that would bill every new follower). A person who unfollows twice shows as
+  "unfollowed 2 times".
+- **Suspended or deleted accounts.** X's docs do not say whether these produce an unfollow event.
+
+### Where the code is
+
+`cloudflare/unfollows/` (the Worker, with `npm test`), `domain/unfollows/` and `data/db/Unfollow.kt` (fetch and storage),
+`ui/unfollows/` (screen). Tests: `cloudflare/unfollows/test/` and `app/src/test/java/com/clipcut/domain/unfollows/`.

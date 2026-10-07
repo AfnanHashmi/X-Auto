@@ -1,0 +1,21 @@
+name = "x-auto-unfollows"
+main = "src/index.js"
+compatibility_date = "2026-10-01"
+
+[vars]
+# The account whose unfollowers are tracked (@main_account). Events about anyone else are refused.
+MAIN_USER_ID = "YOUR_MAIN_USER_ID"
+DAILY_CAP = "300"
+# Filled in after the subscription is created, so the kill-switch can delete it.
+SUBSCRIPTION_ID = "YOUR_SUBSCRIPTION_ID"
+
+# Created with: wrangler d1 create x-auto-unfollows   (then paste the database_id here)
+[[d1_databases]]
+binding = "DB"
+database_name = "x-auto-unfollows"
+database_id = "YOUR_D1_DATABASE_ID"
+
+# Secrets (never in this file), set with `wrangler secret put NAME`:
+#   CONSUMER_SECRET  the X app's API secret, used for the CRC check and POST signatures
+#   BEARER           the X app's app-only Bearer token, used to delete the subscription (kill-switch)
+#   APP_TOKEN        a long random string the phone sends to read the list

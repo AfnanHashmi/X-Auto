@@ -6,8 +6,8 @@ import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 
 @Database(
-    entities = [CaptionTemplate::class, UndoEntry::class, ClipRecord::class, DeletedPost::class],
-    version = 10,
+    entities = [CaptionTemplate::class, UndoEntry::class, ClipRecord::class, DeletedPost::class, Unfollow::class],
+    version = 11,
     exportSchema = true,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -15,6 +15,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun undoEntryDao(): UndoEntryDao
     abstract fun clipRecordDao(): ClipRecordDao
     abstract fun deletedPostDao(): DeletedPostDao
+    abstract fun unfollowDao(): UnfollowDao
 
     companion object {
         /** Adds `mediaRefUrl`, so a restored Caption screen can restore its media reference in full. */
@@ -94,6 +95,18 @@ abstract class AppDatabase : RoomDatabase() {
         val MIGRATION_9_10 = object : Migration(9, 10) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL(ADD_ACCOUNT)
+            }
+        }
+
+        /** Adds `unfollows`, the Unfollowers log. Nothing else changes. */
+        val MIGRATION_10_11 = object : Migration(10, 11) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `unfollows` (`eventUuid` TEXT NOT NULL, `seq` INTEGER NOT NULL, " +
+                        "`userId` TEXT NOT NULL, `username` TEXT, `name` TEXT, `followersCount` INTEGER, " +
+                        "`followingCount` INTEGER, `receivedAtEpochMs` INTEGER NOT NULL, " +
+                        "`fetchedAtEpochMs` INTEGER NOT NULL, PRIMARY KEY(`eventUuid`))",
+                )
             }
         }
     }

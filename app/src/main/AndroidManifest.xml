@@ -49,6 +49,12 @@
             android:exported="false"
             android:theme="@style/Theme.ClipCut" />
 
+        <!-- Unfollowers: reads the tracker and lists who unfollowed the main account. -->
+        <activity
+            android:name=".ui.unfollows.UnfollowsActivity"
+            android:exported="false"
+            android:theme="@style/Theme.ClipCut" />
+
         <!-- Caption and post-to-X flow, launched from LanBufferActivity after a successful export.
              Separate Activity so nothing in it can affect the export and marking flow. -->
         <activity

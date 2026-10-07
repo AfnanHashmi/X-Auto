@@ -7,6 +7,7 @@ import com.clipcut.data.db.CaptionTemplateDao
 import com.clipcut.data.db.ClipRecordDao
 import com.clipcut.data.db.DeletedPostDao
 import com.clipcut.data.db.UndoEntryDao
+import com.clipcut.data.db.UnfollowDao
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -31,6 +32,7 @@ object DatabaseModule {
                 AppDatabase.MIGRATION_7_10,
                 AppDatabase.MIGRATION_8_10,
                 AppDatabase.MIGRATION_9_10,
+                AppDatabase.MIGRATION_10_11,
             )
             .build()
 
@@ -45,4 +47,7 @@ object DatabaseModule {
 
     @Provides
     fun provideDeletedPostDao(db: AppDatabase): DeletedPostDao = db.deletedPostDao()
+
+    @Provides
+    fun provideUnfollowDao(db: AppDatabase): UnfollowDao = db.unfollowDao()
 }

@@ -43,6 +43,7 @@ import com.clipcut.ui.components.Screen
 import com.clipcut.ui.components.SectionCard
 import com.clipcut.ui.deletion.DeletionActivity
 import com.clipcut.ui.gcprune.GcPruneActivity
+import com.clipcut.ui.unfollows.UnfollowsActivity
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
 
@@ -104,9 +105,15 @@ fun HomeScreen(modifier: Modifier = Modifier, viewModel: HomeViewModel = hiltVie
             )
             FeatureCard(
                 title = "GC Prune",
-                body = "Find group-chat members who don't follow your main account, review them, and remove them safely.",
-                status = "Scan removes nobody",
+                body = "Paste usernames, check who they are, and remove them from a group chat safely.",
+                status = "Lookup removes nobody",
                 onClick = { GcPruneActivity.start(context) },
+            )
+            FeatureCard(
+                title = "Unfollowers",
+                body = "See who unfollowed your main account, with the time, as X reports it.",
+                status = "Main account only",
+                onClick = { UnfollowsActivity.start(context) },
             )
             FeatureCard(
                 title = "Trigger Deletion",

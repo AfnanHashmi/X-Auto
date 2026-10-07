@@ -45,6 +45,8 @@ android {
             "X_RW_CONSUMER_KEY", "X_RW_CONSUMER_SECRET",
             "X_RW_ACCESS_TOKEN", "X_RW_ACCESS_SECRET", "X_RW_HANDLE",
             "OPENAI_API_KEY",
+            // The Unfollowers tracker (a Cloudflare Worker): its address and the token the app reads it with.
+            "UNFOLLOW_URL", "UNFOLLOW_TOKEN",
         )) {
             buildConfigField("String", key, "\"${localProperties.getProperty(key, "")}\"")
         }
