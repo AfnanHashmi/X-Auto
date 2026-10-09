@@ -43,6 +43,12 @@
             android:exported="false"
             android:theme="@style/Theme.ClipCut" />
 
+        <!-- Trend Radar: a client for the Cloudflare Worker that reads X through xAI. Read only. -->
+        <activity
+            android:name=".ui.trends.TrendRadarActivity"
+            android:exported="false"
+            android:theme="@style/Theme.ClipCut" />
+
         <!-- Unfollowers: reads the tracker and lists who unfollowed the main account. -->
         <activity
             android:name=".ui.unfollows.UnfollowsActivity"

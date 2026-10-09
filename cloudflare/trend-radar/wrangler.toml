@@ -1,0 +1,19 @@
+name = "x-auto-trend-radar"
+main = "src/index.js"
+compatibility_date = "2026-10-01"
+
+# Every minute: runs the day session if it is switched on, and any run you asked for from the app.
+# It does nothing at all while the session is off.
+[triggers]
+crons = ["* * * * *"]
+
+# Created with: wrangler d1 create x-auto-trend-radar   (then paste the database_id here)
+[[d1_databases]]
+binding = "DB"
+database_name = "x-auto-trend-radar"
+database_id = "0a6231ed-76db-4c11-b5af-6faabb5653e5"
+
+# Secrets (never in this file), set with `wrangler secret put NAME`:
+#   XAI_API_KEY      the xAI key (reads X through Grok's x_search tool)
+#   TREND_APP_TOKEN  a long random string the phone sends to talk to this Worker
+# There are NO X credentials here: this Worker cannot post, reply, like or follow.

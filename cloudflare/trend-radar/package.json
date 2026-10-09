@@ -1,0 +1,16 @@
+{
+  "name": "x-auto-trend-radar",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test --no-warnings test/*.test.js",
+    "measure": "node scripts/measure.mjs",
+    "deploy": "wrangler deploy"
+  },
+  "dependencies": {
+    "openai": "^6.0.0"
+  },
+  "devDependencies": {
+    "wrangler": "^4.0.0"
+  }
+}
