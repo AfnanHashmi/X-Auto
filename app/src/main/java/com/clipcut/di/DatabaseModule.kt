@@ -51,5 +51,4 @@ object DatabaseModule {
 
     @Provides
     fun provideUnfollowDao(db: AppDatabase): UnfollowDao = db.unfollowDao()
-
 }

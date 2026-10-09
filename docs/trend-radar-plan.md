@@ -1,99 +1,217 @@
-# Trend Radar: an X research feature (reports and suggestions only), SESSION version
+# Trend Radar: an X research feature (reports and suggestions only)
 
-Revised 2026-10-09 (third version). History: first a 24/7 schedule; then manual only (because credits are added now and
-then); now a **day session**: nothing runs until you turn it on, and once you do (say in the morning, after adding
-credits) it works through that day's window and shuts itself off. It needs something always on while your phone is in
-your pocket, so the engine is a Cloudflare Worker again, with a hard switch and a spending limit.
+## Context
 
-## What it does and never does
+You want X Auto to watch what people on X are saying about Bigg Boss 20 and turn it into reports.
 
-- **Does:** reads X through xAI Grok (`x_search`) and produces reports: rising sub-topics, what people are asking,
-  posts worth replying to, and ideas for your own posts.
-- **Never:** posts, replies, likes or follows. The Worker's only outbound call is to `api.x.ai`.
-  OpenAI drafts only when you tap "Draft in Caption Generator" in the app.
+- **What it produces:** rising sub-topics, the questions people are asking, posts worth replying to, and angles for
+  your own posts.
+- **What it never does:** post, reply, like or follow. **Nothing touches X except reading.**
+- **Who does what:** xAI Grok does the X research. OpenAI remains the only drafting tool, through the existing
+  Caption Generator, and only when you tap.
 
-## Measured on 2026-10-09 (one real run each)
+Your decisions:
+- **No notifications.** Spikes show up inside the app only: at the top of the report, and as a badge on the home card.
+- **Episode airtime is 9:00 PM daily**, so the default peak window is 9–11 PM.
+- **Pulses every 60 minutes** instead of 30. This is configurable.
 
-| Run | Model | Time | Cost | Posts read (target) |
-|---|---|---|---|---|
-| Pulse | grok-4.7 | 113 s | $0.198 | 24 (20) |
-| Pulse | grok-4.3 | 22 s | $0.106 | 18 (20) |
-| Deep scan | grok-4.3 | 21 s | $0.307 | 56 (90) |
-| Deep scan | grok-4.7 | 143 s | $0.840 | 129 (90) |
+## How you'll use it (day to day)
 
-- X's per-post charge ($5 per 1,000 posts) is most of every cost. Each response reports its exact cost
-  (`usage.cost_in_usd_ticks`), which matched my arithmetic to four decimals.
-- The API cannot cap posts or searches, so targets are approximate and the guard uses real numbers.
-- Defaults: pulses on `grok-4.3`, deep scans on `grok-4.7` (about $4 a weekday, inside the $6 limit).
+You don't start anything. It runs on its own in the background from 12 PM on weekdays and 8 PM on weekends, until
+1 AM. You open the app whenever you want ideas.
 
-## How you use it
+1. **Home screen.** The Trend Radar card shows, for example, "3 rising · last scan 21:05". It turns coloured when
+   something is suddenly taking off.
+2. **Tap the card** to open the latest report, newest first:
+   - **What's rising right now:** for example "RISING: Arishfa vs Kanika kitchen fight, 18 mentions (22%), angry".
+     Each one has 2 example posts you can tap to open in X.
+   - **What people are asking:** for example "Was Gullu's eviction fixed?"
+   - **Posts worth replying to:** a link plus why, such as "high engagement, asks a question you can answer". You open
+     it in X and reply yourself if you want; the app never replies.
+   - **Ideas for your next post:** short angles, not finished posts. Tap **Draft in Caption Generator** on one, and the
+     existing caption screen opens with that idea, so OpenAI writes the draft there. Then use it as you do today.
+3. **Other tabs:**
+   - **Cost:** today and this month, and what each scan cost.
+   - **Settings:** edit keywords, contestant names and hashtags, block spam accounts, and change the times and the
+     daily limit.
+4. **When you want it right now:** **Run pulse now** (cheap and quick) or **Run deep scan now** (the full report)
+   work any time, even outside the active hours.
 
-1. **Morning, after adding credits:** open Trend Radar, set "Spend at most $X today" (default: your daily limit, or the
-   credits you said you added if that is lower), and switch **Day session** on. The screen says "Armed: starts 12:00".
-2. **It runs the day by itself**, only inside that day's window:
-   - weekdays 12:00 PM to 1:00 AM, weekends 8:00 PM to 1:00 AM (IST; the 1 AM end belongs to the day it started);
-   - the first run is a deep scan (if you switch on late it runs one straight away to catch up);
-   - a pulse every 60 minutes (bigger during the 9-11 PM peak), more deep scans at about 6 PM and 11 PM on weekdays
-     and about 11 PM on weekends;
-   - a **spike** (a new or rising sub-topic) queues a focused deep scan, at most 3 a day, 3 hours between scans on the
-     same topic.
-3. **It stops by itself** at the end of the window, when the session's spending limit is reached, or when you switch
-   it off. At 80% of the limit it only does the scheduled deep scans. It never starts the next day on its own.
-4. **Anytime:** open the report (rising first), the cost tab, or settings. **Run pulse now** and **Run deep scan now**
-   work outside a session too (you confirm the estimated cost first). **See a sample report** is free.
+## What exists today, and what I'll reuse
+
+- **Android app** (Kotlin, Compose, Hilt, Room v12):
+  - It has **no notification channel and no WorkManager**; both were removed with Daily Link.
+  - Keys are read from `local.properties` into `BuildConfig`.
+  - OpenAI drafting already lives in the Caption Generator (`ui/caption/CaptionScreen.kt`, which also holds your hashtag
+    list `#BiggBoss20 #QaziTouqeer #ArishfaKhan #UditiSingh #YungDSA #KanikaMann #Gullu`).
+- **There is already an always-on scheduler:** the Cloudflare Worker `cloudflare/unfollows/`. It has D1 storage, cron
+  triggers, Cloudflare secrets, a token-protected API that the app reads, and a tested OAuth 1.0a signer
+  (`src/oauth1.js`). Trend Radar has to run from 12 PM to 1 AM whether your phone or PC is on, so it belongs there.
+- **Patterns to copy:**
+  - app side: `domain/unfollows/*` (parser, service, `RealUnfollowsApi`) and `ui/unfollows/*` (screen and home card);
+  - Worker side: `test/helpers.js` (the D1 fake) and its mutation-check approach.
 
 ## Architecture
 
 ```
-Cloudflare cron (every minute) -> Worker "x-auto-trend-radar" -> D1 database
-   - decides if this minute needs a run (session on, inside the window, due, budget ok)
-   - one run at a time (lock), calls api.x.ai/v1/responses with the x_search tool and a JSON schema
-   - stores the run, matches and labels sub-topics, queues spike scans
-app <-- HTTPS + token: GET /report, POST /session, /run, /config, /exclude
+Cloudflare cron (every 5 min) → Trend Radar Worker (new, cloudflare/trend-radar/)
+   ├─ schedule.js  : decides whether this tick runs anything (IST windows, peak, budget)
+   ├─ xai.js       : OpenAI SDK, baseURL https://api.x.ai/v1, Responses API + x_search + JSON schema
+   ├─ trends.js    : matching, growth score, NEW/RISING/PEAKING/FADING, spike detection, cooldown
+   ├─ budget.js    : cost of each run and the guard (80% → deep scans only, 100% → stop for the day)
+   ├─ enrich.js    : optional engagement numbers via X GET /2/tweets (read-only, $0.005 per post)
+   └─ D1 database x-auto-trends  ←  app reads it over HTTPS with its own token
 ```
 
-- **Separate Worker and database from the unfollow tracker**, so a bug or a spend problem can never touch it.
-- **Cron every minute** so manual runs and scheduled ones start within about a minute, and a run that takes minutes
-  (a deep scan on the bigger model took 143 s) is never tied to a phone connection.
-- **Secrets in Cloudflare only:** `XAI_API_KEY`, `TREND_APP_TOKEN`. The app gets the Worker's address and the token.
-- **Plain `fetch` to xAI's Responses API** (the same OpenAI-compatible API) instead of the OpenAI SDK, to keep the
-  Worker's CPU use small: a run that is billed but killed before it is stored would be lost money.
-  The raw result and cost are stored FIRST, then analysed.
-- **Read-only by construction:** the Worker has no X credentials at all. Its only outbound request is to `api.x.ai`,
-  and a test fails if any other host appears in the code.
+- **A separate Worker and database** from the unfollow tracker, so a bug or a spend problem here can never touch the
+  tracker. The OAuth signer is shared through `cloudflare/shared/oauth1.js`.
+- **Secrets, in Cloudflare only:**
+  - `XAI_API_KEY`;
+  - `TREND_APP_TOKEN`, the phone's read token;
+  - main's X keys, only if enrichment is on.
+  
+  The app gets just the Worker's address and the token (`TREND_URL` and `TREND_TOKEN` in `local.properties`). **No
+  xAI key ever goes in the app.**
+- **Read-only, enforced in code:** the X client in this Worker exposes only `GET /2/tweets`. A test fails if the
+  Worker's code contains any other x.com call. The only POST it ever makes is to `api.x.ai`.
 
 ## The xAI call (checked against docs.x.ai, 2026-10-09)
 
-- Responses API, tool `x_search` only (images and video off), `from_date`/`to_date` whole days (`to_date` exclusive),
-  `excluded_x_handles` (max 20), `max_turns` in the body, strict JSON schema output. No engagement fields exist in the
-  schema, so likes, replies and views can never be invented.
-- No parameter exists for sort order, thread fetching or post count, so those limits are in the instructions and the
-  real numbers (`x_posts_fetched`, tokens, cost) are read from every response.
-- Timeouts per run type; retry only on 429 and 5xx (never on a timeout: the request may be running and billed).
+- `client.responses.create({ model, tools: [{ type: "x_search", from_date, to_date, excluded_x_handles,
+  enable_image_understanding: false, enable_video_understanding: false }], text: { format: json_schema, strict },
+  max_turns })`. In Node, `max_turns` goes in the request body.
+- **Model:** set in config. The default is `grok-4.7`, which the docs use for x_search and structured outputs ($2 in,
+  $6 out per million tokens). Step 1 also tests `grok-4.3` ($1.25 in, $2.50 out); if its output is as good, it
+  becomes the default.
+- **Two things your spec asks for that the API can't enforce.** The docs list **no parameter for sort order (Top or
+  Latest), for turning off thread fetches, or for the number of posts**; the model chooses those itself. So:
+  - "Latest only, no thread fetches, about 20 posts" for pulses, and "Top + Latest, thread fetches allowed, about
+    80–100 posts" for deep scans, go **in the instructions**, together with `max_turns` 1 or 2.
+  - Every run records the actual `x_posts_fetched`, `x_users_fetched`, `x_search_calls` and tokens.
+  - If a pulse fetches more than 2× its target, it is flagged on the cost dashboard, and the budget uses the real
+    numbers, never the planned ones.
+- **Dates:** `from_date` and `to_date` work by whole day only (and `to_date` is exclusive). Pulses use the last 1 day,
+  deep scans the last 1–2 days. Changes within a day come only from comparing stored runs.
+- **No made-up numbers.** The schema has no engagement fields for the model to fill in. Likes, replies and views come
+  only from enrichment (deep scans only, the top 5 cited posts, about $0.025 per scan, on by default and switchable
+  off). Otherwise they stay empty.
+- **Validation:** every reply is checked against the schema after parsing. Post URLs must look like `x.com/*/status/<id>`.
+  A failed check marks the run `invalid`, and its numbers never feed the trend history.
 
-## Trend logic
+## Schedule (IST, all values in config)
 
-- Sub-topics matched across runs by a normalized key (lower-case, no `#` or punctuation, filler words and lone letters
-  dropped, Hinglish spellings merged, words sorted; similar keys with 60% word overlap or a one-fifth edit distance
-  are the same).
-- Share = mentions / all mentions in that run. Baseline = average share over the last 4 runs. Growth =
-  (share - baseline) / max(baseline, 0.02).
-- **NEW** (first seen within 48 h), **RISING** (growth at least 1.0 and 3+ mentions), **PEAKING** (near its peak and
-  flat), **FADING** (40% below its recent peak, or gone from the latest run), else STEADY.
+- **Weekdays:** active 12:00 PM to 1:00 AM.
+  - Deep scans at 12:00, about 18:00 and about 23:00.
+  - A pulse every 60 minutes.
+- **Weekends:** active 8:00 PM to 1:00 AM.
+  - Deep scans at 20:00 and about 23:00.
+  - A pulse every 60 minutes.
+- **The 12:00–1:00 AM spill counts as the day it started.** "Is this tick inside a window" checks both today's window
+  and the window that started yesterday.
+- **Peak window:** 21:00 to 23:00 daily. Pulses there use 40 posts instead of 20.
+- **Spike scans:**
+  - A pulse triggers one when a sub-topic is new with at least 3 mentions, or when its share is at least twice its
+    baseline and up 10 points.
+  - The scan focuses on that sub-topic's keywords.
+  - There is a 3-hour cooldown per sub-topic and at most 3 spike scans a day.
+  - They run only inside a window and only if the budget allows.
+- **Nothing runs outside a window**, spike scans included. The only exception is the manual run (below).
 
-## Cost guard
+## Storage (D1) and trend logic
 
-- Every run is checked at its worst case (1.5x the likely cost) before it starts.
-- **Session limit:** you set it when you switch on. 80% -> scheduled deep scans only. A run that would not fit in what
-  is left ends the session ("budget used").
-- **Daily limit** (default $6) applies to everything, manual runs included.
-- **Credits I added** (optional) is subtracted by what the radar itself spent since you entered it.
-- It cannot see your real xAI balance. The numbers are the radar's own record of what its runs cost.
+- **Tables:**
+  - `config`: one JSON document, editable from the app;
+  - `runs`: type, trigger, times, window day, model, settings, status, error, posts, users, search calls, tokens
+    (input, cached, output, reasoning), cost;
+  - `subtopics`: normalized key, display name, aliases, first and last seen;
+  - `snapshots`: run, key, mentions, share, sentiment, keywords, examples, label, growth;
+  - `findings`: questions, reply targets and angles from deep scans;
+  - `post_metrics`: enrichment results.
+- **Normalized key:** lower-case, `#` removed, punctuation and filler words dropped, Hinglish spelling variants merged
+  through an alias table, words sorted. If no key matches exactly, a similar existing one (word overlap of 0.6 or more,
+  or close spelling) is matched instead, and the new name is stored as an alias.
+- **Growth and labels:** share means mentions divided by all mentions in that run's sample. The baseline is the
+  average share over the last 4 pulses and the last 24 hours. Growth is (share − baseline) ÷ max(baseline, 0.02).
+  - **NEW:** first seen within the last 48 hours.
+  - **RISING:** growth of 1.0 or more and at least 3 mentions.
+  - **PEAKING:** near its highest share, and growth has flattened.
+  - **FADING:** share at least 40% below its peak over the last 3 runs.
 
-## Build order (small commits)
+## Budget guard
 
-1. Worker: schema, config, schedule (IST windows, peak, slots), parse, analysis, budget, runner, endpoints, tests,
-   mutation check.
-2. Deploy with the session OFF; one manual run and the free sample as a check.
-3. App: report, cost, settings, session switch, manual runs, the Caption Generator hand-off, home card.
-4. README, install, a check with you.
+- **Prices in config:**
+  - $5 per 1,000 posts;
+  - $10 per 1,000 user profiles;
+  - per-model token rates, including cached and reasoning tokens;
+  - $0.005 per enriched post.
+- **Daily cap:** $6 by default, counted per window day.
+- **Before each run:** it estimates the worst case from recent averages of that run type.
+  - At 80% of the cap, pulses and spike scans stop; scheduled deep scans continue.
+  - At 100%, or if the next run would cross 100%, everything stops until the next window. It is logged, and the app
+    shows a banner.
+- **Expected cost:** about $3.5 per weekday and $2 per weekend day, roughly $90 a month. Step 1 replaces these
+  guesses with measured numbers.
+
+## In the app
+
+- **Home card "Trend Radar":** shows "N rising · last scan 21:05". The card is tinted while there is a RISING or NEW
+  spike.
+- **Report screen:**
+  - the latest report first, with RISING and NEW sub-topics at the top;
+  - for each sub-topic: label chip, mention count and share, sentiment, keywords, and 2 example posts that open in X;
+  - deep-scan sections: what people are asking, posts worth replying to (link and why; you reply yourself), and
+    suggested angles;
+  - each angle has **"Draft in Caption Generator"**, which opens the existing OpenAI caption screen with the angle as
+    context. That is the only drafting, and only when you tap.
+- **Cost tab:** today and this month, plus a list of runs with type, posts, tokens and cost.
+- **Settings:**
+  - topics, keywords (English, Hindi and Hinglish), contestants, hashtags and excluded handles (at most 20);
+  - pulse sizes, the model, prices, cap and schedule.
+  
+  Every report row has **"Exclude this account"**, which adds it to the spam list.
+- **Manual run:** "Run pulse now" and "Run deep scan now" work outside windows and still respect the 100% cap.
+  There's also a free **dry run** that replays a saved sample answer, so nothing is spent. The same is available as
+  `npm run radar -- --type deep [--dry-run]`.
+
+## Errors
+
+- 60-second timeout on pulses and 120 seconds on deep scans.
+- Two retries with backoff on 429, 5xx and timeouts. It honours `retry-after`.
+- Errors are stored on the run, and a failed run never changes trends.
+- A missing key or bad config leaves the run `skipped` with a reason.
+
+## Tests (mocked xAI, no network)
+
+- **Fixtures:** sample pulse and deep-scan answers, including a bad-schema one and one with too many posts.
+- **Covered:**
+  - **schedule:** weekday, weekend, 1 AM spill, peak, hourly pulses, deep-scan times, "nothing outside windows";
+  - **matching and labels:** fuzzy matching and Hinglish aliases, growth and the four labels, spike detection and
+    cooldown;
+  - **budget:** cost maths and the 80% / 100% guard;
+  - **API behaviour:** retries and timeouts, schema rejection, enrichment that refuses anything but GET;
+  - **app side:** parser and screen state.
+- **Mutation check** on the window, budget and read-only rules, as with the unfollow Worker.
+
+## Order of work (small commits)
+
+1. **Measure first:** one real manual pulse and one real deep scan from a script, with `grok-4.7` and with `grok-4.3`.
+   This records real posts, tokens, cost and running time, and confirms structured output works with `x_search`.
+   **I report the numbers before building the rest.** Costs about $2.
+2. The Worker skeleton: D1 schema, config with defaults (Bigg Boss 20 keywords, contestants and hashtags), xAI client,
+   schema, validation and cost, with fixture tests.
+3. Schedule and budget guard, with tests.
+4. Trends: matching, labels, spikes, cooldown, with tests.
+5. Enrichment (read-only) and the read, config and run endpoints, with tests and a mutation check.
+6. Deploy with the schedule **paused**, check one manual run, then turn the schedule on.
+7. App: Room is not needed (the app reads the report live and keeps the last one in memory and a small cache). Then
+   the home card, report, cost and settings screens, and the "Draft in Caption Generator" hand-off.
+8. README section, install, and a check with you.
+
+## Risks and open points
+
+- **The number of posts per run is not controllable** through the API (see above). The real per-run cost is known
+  only after step 1, and the guard works on actual spend.
+- **Cloudflare free plan:** each run gets 10 ms of CPU, and long waits for xAI don't count against that. Whether a
+  60–120 s deep scan finishes inside a scheduled run is checked in step 1. If it doesn't, the fix is Workers Paid at
+  $5 a month, and I'll ask first.
+- **Your X spend:** enrichment adds about $0.025 per deep scan to your X bill. It can be switched off.

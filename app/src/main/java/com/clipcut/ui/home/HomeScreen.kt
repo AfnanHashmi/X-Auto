@@ -36,16 +36,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.compose.runtime.collectAsState
 import com.clipcut.data.db.UnfollowDao
-import androidx.lifecycle.viewModelScope
-import com.clipcut.data.radar.RadarCache
-import com.clipcut.domain.radar.Outcome
-import com.clipcut.domain.radar.RadarService
-import com.clipcut.domain.radar.RadarSummary
 import com.clipcut.domain.unfollows.UnfollowSummary
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 import com.clipcut.data.x.BbLogsCounter
@@ -56,7 +47,6 @@ import com.clipcut.ui.caption.CaptionGeneratorActivity
 import com.clipcut.ui.components.Screen
 import com.clipcut.ui.components.SectionCard
 import com.clipcut.ui.deletion.DeletionActivity
-import com.clipcut.ui.trends.TrendRadarActivity
 import com.clipcut.ui.unfollows.UnfollowsActivity
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
@@ -66,25 +56,7 @@ class HomeViewModel @Inject constructor(
     private val counter: BbLogsCounter,
     private val selector: MediaAccountSelector,
     unfollowDao: UnfollowDao,
-    private val radar: RadarService,
-    private val radarCache: RadarCache,
 ) : ViewModel() {
-    private val _radar = MutableStateFlow(radarCache.load())
-
-    /** The Trend Radar card: shown from the last known state at once, then refreshed (read only) when the screen starts. */
-    val radarSummary: StateFlow<RadarSummary> = _radar.asStateFlow()
-
-    fun refreshRadar() {
-        if (!radar.isConfigured) return
-        viewModelScope.launch {
-            (radar.report() as? Outcome.Ok)?.let {
-                val s = RadarSummary.of(it.value)
-                radarCache.save(s)
-                _radar.value = s
-            }
-        }
-    }
-
     /** Today's unfollows and group kicks, live from the local log, for the Unfollowers card. */
     val unfollowSummary: Flow<UnfollowSummary> = unfollowDao.observeAll().map { UnfollowSummary.of(it) }
 
@@ -106,14 +78,12 @@ fun HomeScreen(modifier: Modifier = Modifier, viewModel: HomeViewModel = hiltVie
     var caption by remember { mutableStateOf(viewModel.nextCaption()) }
     var active by remember { mutableStateOf(viewModel.active) }
     val summary by viewModel.unfollowSummary.collectAsState(initial = UnfollowSummary.EMPTY)
-    val radar by viewModel.radarSummary.collectAsState()
     val lifecycleOwner = LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_START) {
                 caption = viewModel.nextCaption()
                 active = viewModel.active
-                viewModel.refreshRadar()
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
@@ -142,7 +112,6 @@ fun HomeScreen(modifier: Modifier = Modifier, viewModel: HomeViewModel = hiltVie
                 status = "No clip needed",
                 onClick = { CaptionGeneratorActivity.start(context) },
             )
-            TrendRadarCard(summary = radar, onClick = { TrendRadarActivity.start(context) })
             UnfollowersCard(summary = summary, onClick = { UnfollowsActivity.start(context) })
             FeatureCard(
                 title = "Trigger Deletion",
@@ -190,40 +159,6 @@ private fun AccountSwitcher(active: MediaAccount, onSelect: (MediaAccount) -> Un
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.error,
             )
-        }
-    }
-}
-
-/**
- * The Trend Radar card: whether today's session is on, how many topics are rising, and when it last looked.
- * It turns coloured while something is rising.
- */
-@Composable
-private fun TrendRadarCard(summary: RadarSummary, onClick: () -> Unit) {
-    val rising = summary.rising > 0
-    val container = if (rising) MaterialTheme.colorScheme.tertiaryContainer else MaterialTheme.colorScheme.surface
-    val phase = when (summary.phase) {
-        "running" -> "Session on" + (summary.budgetUsd?.let { " · \$%.2f of \$%.2f".format(summary.spentUsd, it) } ?: "")
-        "armed" -> "Session armed, waiting for the window"
-        "ended" -> "Session ended"
-        else -> "Session off"
-    }
-    Card(onClick = onClick, modifier = Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = container)) {
-        Column(modifier = Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Text("Trend Radar", style = MaterialTheme.typography.titleLarge)
-            Text(
-                "What X is saying about Bigg Boss 20: rising topics, questions and ideas for your posts. Reads only.",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.padding(top = 4.dp)) {
-                CountPill(phase, if (summary.phase == "running") MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
-                CountPill("${summary.rising} rising", if (rising) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-            summary.lastRunAtMs?.let {
-                val t = java.time.Instant.ofEpochMilli(it).atZone(java.time.ZoneId.systemDefault()).format(java.time.format.DateTimeFormatter.ofPattern("d MMM, HH:mm"))
-                Text((if (summary.sample) "Showing a sample report from " else "Last scan ") + t, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
         }
     }
 }

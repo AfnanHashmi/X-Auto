@@ -41,7 +41,6 @@ class CaptionViewModel @Inject constructor(
     private val undoEntryDao: UndoEntryDao,
     private val clipRecordDao: ClipRecordDao,
     mediaAccountSelector: MediaAccountSelector,
-    captionSeed: CaptionSeed,
 ) : ViewModel() {
 
     private val clipPath: String = Uri.decode(checkNotNull(savedStateHandle["clipPath"]))
@@ -65,8 +64,6 @@ class CaptionViewModel @Inject constructor(
     val uiState: StateFlow<CaptionUiState> = _uiState.asStateFlow()
 
     init {
-        // An idea handed over from Trend Radar becomes the starting text of the standalone generator, once.
-        if (standalone) captionSeed.take()?.let { idea -> _uiState.update { it.copy(body = idea) } }
         viewModelScope.launch {
             captionTemplateDao.observeAll().collect { templates ->
                 _uiState.update { it.copy(templates = templates) }

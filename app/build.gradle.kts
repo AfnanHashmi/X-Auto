@@ -47,9 +47,6 @@ android {
             "OPENAI_API_KEY",
             // The Unfollowers tracker (a Cloudflare Worker): its address and the token the app reads it with.
             "UNFOLLOW_URL", "UNFOLLOW_TOKEN",
-            // Trend Radar (a Cloudflare Worker that reads X through xAI): its address and the token the app talks to it with.
-            // The xAI key itself lives only in Cloudflare, never in the app.
-            "TREND_URL", "TREND_TOKEN",
         )) {
             buildConfigField("String", key, "\"${localProperties.getProperty(key, "")}\"")
         }
