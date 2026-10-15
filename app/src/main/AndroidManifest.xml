@@ -49,6 +49,12 @@
             android:exported="false"
             android:theme="@style/Theme.ClipCut" />
 
+        <!-- Tagline Counter: counts tweets per phrase through X's counts endpoint. Read only. -->
+        <activity
+            android:name=".ui.taglines.TaglinesActivity"
+            android:exported="false"
+            android:theme="@style/Theme.ClipCut" />
+
         <!-- Caption and post-to-X flow, launched from LanBufferActivity after a successful export.
              Separate Activity so nothing in it can affect the export and marking flow. -->
         <activity

@@ -7,6 +7,8 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -47,6 +49,7 @@ import com.clipcut.ui.caption.CaptionGeneratorActivity
 import com.clipcut.ui.components.Screen
 import com.clipcut.ui.components.SectionCard
 import com.clipcut.ui.deletion.DeletionActivity
+import com.clipcut.ui.taglines.TaglinesActivity
 import com.clipcut.ui.unfollows.UnfollowsActivity
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
@@ -91,7 +94,7 @@ fun HomeScreen(modifier: Modifier = Modifier, viewModel: HomeViewModel = hiltVie
     }
 
     Screen(title = "X Auto", subtitle = "Bigg Boss clipping and posting", modifier = modifier) {
-        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Column(modifier = Modifier.weight(1f).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             AccountSwitcher(
                 active = active,
                 onSelect = { account ->
@@ -113,6 +116,12 @@ fun HomeScreen(modifier: Modifier = Modifier, viewModel: HomeViewModel = hiltVie
                 onClick = { CaptionGeneratorActivity.start(context) },
             )
             UnfollowersCard(summary = summary, onClick = { UnfollowsActivity.start(context) })
+            FeatureCard(
+                title = "Tagline Counter",
+                body = "Count how many tweets used each of your taglines in the last 24 hours.",
+                status = "Reads only, about $0.01 per tagline",
+                onClick = { TaglinesActivity.start(context) },
+            )
             FeatureCard(
                 title = "Trigger Deletion",
                 body = "Review and delete the media account's posts from a chosen time period.",
