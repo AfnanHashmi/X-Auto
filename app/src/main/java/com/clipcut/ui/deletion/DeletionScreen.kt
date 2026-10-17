@@ -363,8 +363,8 @@ private fun ConfirmDialog(state: DeletionUiState, vm: DeletionViewModel) {
         title = { Text("Delete $n posts from @${state.handle}?") },
         text = {
             Text(
-                "This permanently deletes $n posts posted between ${state.windowLabel}. Every one reads exactly " +
-                    "the account's own posts, whatever they say. Your main account is not touched. This cannot be undone.\n\n" +
+                "This permanently deletes $n of @${state.handle}'s own posts from ${state.windowLabel}, whatever they say. " +
+                    "Your main account is not touched. This cannot be undone.\n\n" +
                     "They are deleted one at a time with a pause between each, and you can stop at any point.",
             )
         },

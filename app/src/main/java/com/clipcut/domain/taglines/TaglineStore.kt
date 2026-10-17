@@ -22,6 +22,11 @@ class TaglineStore @Inject constructor(@ApplicationContext context: Context) {
         prefs.edit().putString(KEY_LIST, JSONArray(list).toString()).apply()
     }
 
+    /** Share as a long post (X Premium). Remembered between shares. */
+    var longPosts: Boolean
+        get() = prefs.getBoolean("long_posts", true)
+        set(v) = prefs.edit().putBoolean("long_posts", v).apply()
+
     fun lastReport(): CountReport? = prefs.getString(KEY_REPORT, null)?.let { runCatching { decode(it) }.getOrNull() }
 
     fun saveReport(report: CountReport) {

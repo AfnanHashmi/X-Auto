@@ -1,0 +1,36 @@
+# Copy to local.properties (git-ignored) and fill in. Values are built into the debug app as BuildConfig fields.
+sdk.dir=C\:\\Users\\you\\AppData\\Local\\Android\\Sdk
+
+# ---- LLM layer (caption rewrites and variants, Tagline Counter read-out) ------------------------------------------
+# Which provider is tried first: xai (default) or openai. The other one is the fallback when it has a key.
+LLM_PROVIDER=xai
+XAI_API_KEY=
+OPENAI_API_KEY=
+# Optional model overrides; blank uses the defaults (xAI: grok-4.3, "Best"/higher quality: grok-4.7; OpenAI: gpt-5.6-terra).
+XAI_MODEL_ANALYSIS=
+XAI_MODEL_CAPTION=
+XAI_MODEL_HIGH=
+OPENAI_MODEL_ANALYSIS=
+OPENAI_MODEL_CAPTION=
+OPENAI_MODEL_HIGH=
+
+# ---- X apps (posting, counting, reading stay on the official X API) -----------------------------------------------
+# DK (media account): posts and deletes clips.
+X_MEDIA_CONSUMER_KEY=
+X_MEDIA_CONSUMER_SECRET=
+X_MEDIA_ACCESS_TOKEN=
+X_MEDIA_ACCESS_SECRET=
+# RW (media account): posts and deletes clips.
+X_RW_CONSUMER_KEY=
+X_RW_CONSUMER_SECRET=
+X_RW_ACCESS_TOKEN=
+X_RW_ACCESS_SECRET=
+X_RW_HANDLE=
+# Main: app-only reads (Boss Meter counts, balance). Its posting tokens are not used by the app.
+X_MAIN_CONSUMER_KEY=
+X_MAIN_CONSUMER_SECRET=
+
+# ---- Other services -----------------------------------------------------------------------------------------------
+UNFOLLOW_URL=
+UNFOLLOW_TOKEN=
+WEBSITE_PUBLISH_KEY=

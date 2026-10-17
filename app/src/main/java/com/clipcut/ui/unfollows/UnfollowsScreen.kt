@@ -69,7 +69,7 @@ fun UnfollowsScreen(
     val context = LocalContext.current
     val whitelist = state.status?.automation?.whitelist.orEmpty().toSet()
 
-    Screen(title = "Unfollowers", subtitle = "Who unfollowed @main_account, and who was kicked out of the group", modifier = modifier) {
+    Screen(title = "Unfollowers", subtitle = "Unfollows of @main_account and group kicks", modifier = modifier) {
         LazyColumn(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(14.dp)) {
             item { SummaryCard(state) }
             item { AutomationCard(state, onMode = viewModel::setMode, onResume = viewModel::resume) }

@@ -17,9 +17,6 @@ import dagger.hilt.components.SingletonComponent
  * LIVE: the media upload and the "latest post" lookup hit the real X API (media account). The main
  * account only ever copies to the clipboard ([ClipboardMainAccountApi]), so nothing is posted to it
  * from the app. The AI caption enhancer is real too.
- *
- * To dry-run again, bind the Fake* classes (in `domain.api.fake`) and afterwards delete any clip
- * records whose mediaRefId starts with "fake-".
  */
 @Module
 @InstallIn(SingletonComponent::class)

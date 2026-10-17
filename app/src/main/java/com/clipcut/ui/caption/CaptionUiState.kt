@@ -29,8 +29,16 @@ data class CaptionUiState(
     val uploadOutcomeUnknown: Boolean = false,
     /** The generator opened without a clip: nothing to upload, and only the caption is copied. */
     val standalone: Boolean = false,
-    /** Which media account this clip is being posted to ("DK" or "BB"). */
+    /** Which media account this clip is being posted to ("DK" or "RW"). */
     val mediaAccountLabel: String = "",
+    /** Caption variants to pick from; tapping one puts it in the caption box (undoable). */
+    val variants: List<String> = emptyList(),
+    val variantsLabel: String? = null,
+    val variantCount: Int = 3,
+    /** Optional: what is trending now, worked into the variants only where it fits. */
+    val trending: String = "",
+    val highQuality: Boolean = false,
+    val isMakingVariants: Boolean = false,
 ) {
     /** The exact text that is copied and posted: the layout's label, the heading, then the caption. */
     val caption: String get() = CaptionFormatText.compose(format, heading, body)
@@ -49,5 +57,8 @@ data class CaptionUiState(
         get() = if (format == CaptionFormat.PLAIN) heading.isNotBlank() || body.isNotBlank() else heading.isNotBlank() && body.isNotBlank()
 
     /** Enhancing needs something to enhance: the heading or the caption. */
-    val canEnhance: Boolean get() = !isEnhancing && (heading.isNotBlank() || body.isNotBlank())
+    val canEnhance: Boolean get() = !isEnhancing && !isMakingVariants && (heading.isNotBlank() || body.isNotBlank())
+
+    /** Variants rewrite the caption text only (not the heading or label). */
+    val canMakeVariants: Boolean get() = !isEnhancing && !isMakingVariants && body.isNotBlank()
 }

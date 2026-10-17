@@ -35,4 +35,33 @@ object GalleryStore {
         resolver.update(uri, values, null, null)
         true
     }
+
+    /**
+     * Saves a shared results image to Pictures/X Auto, so every image that went to X is also kept on the phone. Small
+     * and quick, so it runs inline. False on Android 9 and older, or if the gallery refused it.
+     */
+    fun saveImage(context: Context, file: File, displayName: String): Boolean {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return false
+        val resolver = context.contentResolver
+        val values = ContentValues().apply {
+            put(MediaStore.Images.Media.DISPLAY_NAME, displayName)
+            put(MediaStore.Images.Media.MIME_TYPE, "image/png")
+            put(MediaStore.Images.Media.RELATIVE_PATH, "Pictures/X Auto")
+            put(MediaStore.Images.Media.IS_PENDING, 1)
+        }
+        val uri = resolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values) ?: return false
+        return try {
+            resolver.openOutputStream(uri)?.use { out -> file.inputStream().use { it.copyTo(out) } } ?: run {
+                resolver.delete(uri, null, null)
+                return false
+            }
+            values.clear()
+            values.put(MediaStore.Images.Media.IS_PENDING, 0)
+            resolver.update(uri, values, null, null)
+            true
+        } catch (e: java.io.IOException) {
+            resolver.delete(uri, null, null)
+            false
+        }
+    }
 }

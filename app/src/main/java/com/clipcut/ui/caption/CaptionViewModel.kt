@@ -21,6 +21,8 @@ import com.clipcut.domain.api.MediaAccount
 import com.clipcut.domain.api.MediaAccountApi
 import com.clipcut.domain.api.MediaRef
 import com.clipcut.domain.api.MediaUploader
+import com.clipcut.domain.api.real.MAX_VARIANTS
+import com.clipcut.domain.api.real.MIN_VARIANTS
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -251,7 +253,9 @@ class CaptionViewModel @Inject constructor(
             runEnhance(before).fold(
                 onSuccess = { (heading, body) ->
                     pushUndo(before)
-                    _uiState.update { it.copy(isEnhancing = false, heading = heading, body = body) }
+                    _uiState.update {
+                        it.copy(isEnhancing = false, heading = heading, body = body, statusMessage = captionEnhancer.lastUsedLabel?.let { l -> "Rewritten by $l" })
+                    }
                 },
                 onFailure = { e ->
                     _uiState.update { it.copy(isEnhancing = false, statusMessage = "Enhance failed: ${e.message}") }
@@ -259,6 +263,37 @@ class CaptionViewModel @Inject constructor(
             )
         }
     }
+
+    fun setVariantCount(n: Int) = _uiState.update { it.copy(variantCount = n.coerceIn(MIN_VARIANTS, MAX_VARIANTS)) }
+
+    fun setTrending(text: String) = _uiState.update { it.copy(trending = text) }
+
+    fun setHighQuality(on: Boolean) = _uiState.update { it.copy(highQuality = on) }
+
+    /** Asks for [CaptionUiState.variantCount] takes on the caption text in the chosen mood. Nothing changes until one is picked. */
+    fun makeVariants() {
+        commitManualEdit()
+        val s = _uiState.value
+        if (!s.canMakeVariants) return
+        _uiState.update { it.copy(isMakingVariants = true, statusMessage = null) }
+        viewModelScope.launch {
+            captionEnhancer.variants(s.body, s.mood, s.variantCount, s.trending, s.highQuality).fold(
+                onSuccess = { v -> _uiState.update { it.copy(isMakingVariants = false, variants = v.variants, variantsLabel = v.label) } },
+                onFailure = { e -> _uiState.update { it.copy(isMakingVariants = false, statusMessage = "Variants failed: ${e.message}") } },
+            )
+        }
+    }
+
+    /** Puts a variant in the caption box; Undo brings the previous caption back. */
+    fun useVariant(text: String) {
+        commitManualEdit()
+        val before = _uiState.value.snapshot()
+        if (before.body == text) return
+        pushUndo(before)
+        _uiState.update { it.copy(body = text) }
+    }
+
+    fun clearVariants() = _uiState.update { it.copy(variants = emptyList(), variantsLabel = null) }
 
     private fun pushUndo(previous: CaptionSnapshot) {
         viewModelScope.launch {

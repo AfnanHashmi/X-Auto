@@ -1,5 +1,6 @@
 package com.clipcut.ui.components
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -7,11 +8,10 @@ import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -20,12 +20,12 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 
 /**
- * The shell every screen sits in: a title, an optional back action, and a body that scrolls on its
- * own if it needs to. Having one of these is most of what stops the app looking hand-assembled.
+ * The shell every screen sits in: a title, an optional one-line subtitle, an optional back action, and a body that
+ * scrolls on its own if it needs to.
  */
 @Composable
 fun Screen(
@@ -39,16 +39,18 @@ fun Screen(
         modifier = modifier
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.background)
-            .padding(horizontal = 20.dp),
+            .padding(horizontal = 18.dp),
     ) {
-        Column(modifier = Modifier.padding(top = 24.dp, bottom = 16.dp)) {
+        Column(modifier = Modifier.padding(top = 22.dp, bottom = 14.dp)) {
             Text(title, style = MaterialTheme.typography.headlineMedium)
             if (subtitle != null) {
                 Text(
                     subtitle,
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(top = 4.dp),
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(top = 2.dp),
                 )
             }
         }
@@ -59,6 +61,22 @@ fun Screen(
     }
 }
 
+/** The card surface used everywhere: dark, a hairline border, rounded. */
+@Composable
+fun Panel(
+    modifier: Modifier = Modifier,
+    color: Color = MaterialTheme.colorScheme.surface,
+    onClick: (() -> Unit)? = null,
+    content: @Composable () -> Unit,
+) {
+    val border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+    if (onClick != null) {
+        Surface(onClick = onClick, modifier = modifier, color = color, shape = MaterialTheme.shapes.medium, border = border, content = content)
+    } else {
+        Surface(modifier = modifier, color = color, shape = MaterialTheme.shapes.medium, border = border, content = content)
+    }
+}
+
 /** A titled block. Groups related controls so a screen reads as sections rather than a list of widgets. */
 @Composable
 fun SectionCard(
@@ -66,23 +84,62 @@ fun SectionCard(
     modifier: Modifier = Modifier,
     content: @Composable ColumnScope.() -> Unit,
 ) {
-    Card(
-        modifier = modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-    ) {
+    Panel(modifier = modifier.fillMaxWidth()) {
         Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             if (title != null) {
                 Text(
                     title.uppercase(),
-                    style = MaterialTheme.typography.labelMedium,
+                    style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
             content()
         }
+    }
+}
+
+/**
+ * A home-screen entry: a title, one short status line and a small accent dot. [tint] fills the tile when it needs
+ * attention (for example someone was kicked today).
+ */
+@Composable
+fun NavTile(
+    title: String,
+    status: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    accent: Color = MaterialTheme.colorScheme.primary,
+    tint: Color? = null,
+) {
+    Panel(modifier = modifier.heightIn(min = 92.dp), color = tint ?: MaterialTheme.colorScheme.surface, onClick = onClick) {
+        Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(title, style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text("›", style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Surface(color = accent, shape = CircleShape, modifier = Modifier.size(6.dp), content = {})
+                Text(
+                    status,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(start = 8.dp),
+                )
+            }
+        }
+    }
+}
+
+/** A small rounded label, tinted with [color]. */
+@Composable
+fun Pill(text: String, color: Color, modifier: Modifier = Modifier) {
+    Surface(color = color.copy(alpha = 0.14f), shape = CircleShape, modifier = modifier) {
+        Text(text, style = MaterialTheme.typography.labelMedium, color = color, modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp))
     }
 }
 
@@ -93,7 +150,7 @@ fun StatusRow(text: String, tone: Tone = Tone.Neutral, modifier: Modifier = Modi
         Surface(
             color = tone.color(),
             shape = CircleShape,
-            modifier = Modifier.size(8.dp),
+            modifier = Modifier.size(7.dp),
             content = {},
         )
         Text(
@@ -124,21 +181,9 @@ fun WarningCard(text: String, modifier: Modifier = Modifier) {
     ) {
         Text(
             text,
-            modifier = Modifier.padding(14.dp),
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onErrorContainer,
         )
     }
-}
-
-/** Shown where a list would be, when the list is empty. */
-@Composable
-fun EmptyState(text: String, modifier: Modifier = Modifier) {
-    Text(
-        text,
-        modifier = modifier.fillMaxWidth().padding(vertical = 28.dp),
-        style = MaterialTheme.typography.bodyMedium,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
-        textAlign = TextAlign.Center,
-    )
 }

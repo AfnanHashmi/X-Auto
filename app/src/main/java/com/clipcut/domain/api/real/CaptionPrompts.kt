@@ -301,3 +301,54 @@ It must not change WHAT actually happened.
     val template = if (templateMode) "\n\n$TEMPLATE_BLOCK" else ""
     return "$MASTER_SYSTEM_PROMPT\n\n$moodBlock$template".trim()
 }
+
+// ---- caption variants ------------------------------------------------------------------------------------------------
+
+const val MIN_VARIANTS = 3
+const val MAX_VARIANTS = 5
+
+/** The same caption rules and mood as a single rewrite, asking for [count] clearly different takes as JSON. */
+internal fun buildVariantsPrompt(mood: CaptionMood, count: Int): String = buildPrompt(mood) + """
+
+
+━━━━━━━━━━━━━━━━━━━━
+VARIANTS
+━━━━━━━━━━━━━━━━━━━━
+
+Write $count different versions of the caption, each a complete caption on its own.
+Make them genuinely different: vary the opening, the angle and the rhythm, not just a word or two.
+Every version keeps exactly the facts of the input. Never add names, events, quotes or numbers that are not in it.
+If TRENDING CONTEXT is given, use it only where it fits this clip (for example a matching hashtag or phrase);
+never claim the clip is about a trend it is not about.
+Return JSON: {"variants": ["...", "..."]} with exactly $count strings, best first."""
+
+internal fun variantsUserText(text: String, trending: String): String = buildString {
+    append("CAPTION: ").append(text.trim())
+    trending.trim().takeIf { it.isNotEmpty() }?.let { append("\n\nTRENDING CONTEXT: ").append(it.take(500)) }
+}
+
+/** Structured output: an object with one array of strings. */
+internal fun variantsSchema(count: Int): org.json.JSONObject = org.json.JSONObject()
+    .put("type", "object")
+    .put(
+        "properties",
+        org.json.JSONObject().put(
+            "variants",
+            org.json.JSONObject().put("type", "array").put("items", org.json.JSONObject().put("type", "string"))
+                .put("description", "Exactly $count different captions, best first"),
+        ),
+    )
+    .put("required", org.json.JSONArray().put("variants"))
+    .put("additionalProperties", false)
+
+/** The variants from the model's JSON: trimmed, blanks and repeats dropped, at most [count]. At least one or it fails. */
+internal fun parseVariants(json: String, count: Int): List<String> {
+    val arr = try {
+        org.json.JSONObject(json.trim().removePrefix("```json").removePrefix("```").removeSuffix("```").trim()).getJSONArray("variants")
+    } catch (e: org.json.JSONException) {
+        throw IllegalStateException("The model did not return the variants as JSON")
+    }
+    val out = (0 until arr.length()).map { arr.optString(it).trim() }.filter { it.isNotEmpty() }.distinct().take(count)
+    check(out.isNotEmpty()) { "The model returned no variants" }
+    return out
+}

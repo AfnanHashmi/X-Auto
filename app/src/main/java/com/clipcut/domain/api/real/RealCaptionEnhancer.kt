@@ -1,33 +1,25 @@
 package com.clipcut.domain.api.real
 
-import com.clipcut.BuildConfig
 import com.clipcut.domain.api.CaptionEnhancer
 import com.clipcut.domain.api.CaptionMood
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
-import okhttp3.MediaType.Companion.toMediaType
-import okhttp3.OkHttpClient
-import okhttp3.Request
-import okhttp3.RequestBody.Companion.toRequestBody
-import org.json.JSONArray
-import org.json.JSONObject
-import java.util.concurrent.TimeUnit
+import com.clipcut.domain.api.CaptionVariants
+import com.clipcut.domain.llm.LlmClient
+import com.clipcut.domain.llm.LlmTask
 import javax.inject.Inject
 
-private const val ENDPOINT = "https://api.openai.com/v1/responses"
-private const val MODEL = "gpt-5.6-terra"
-// A reasoning-capable model can take well past OkHttp's default 10s read timeout.
-private const val READ_TIMEOUT_SECONDS = 60L
-
 /**
- * Rewrites captions via the OpenAI Responses API. Never posts anything: the result only replaces
- * the text in the caption box (with an undo step), and the user still reviews it before posting.
+ * Rewrites captions through [LlmClient]: xAI (Grok) by default, OpenAI as the fallback. Never posts anything: the result
+ * only replaces the text in the caption box (with an undo step), and the user still reviews it before posting.
  */
 class RealCaptionEnhancer @Inject constructor(
-    private val okHttpClient: OkHttpClient,
+    private val llm: LlmClient,
 ) : CaptionEnhancer {
+    @Volatile
+    override var lastUsedLabel: String? = null
+        private set
+
     override suspend fun enhance(text: String, mood: CaptionMood): Result<String> = runCatching {
-        complete(system = buildPrompt(mood), user = text)
+        llm.respond(LlmTask.CAPTION, system = buildPrompt(mood), user = text).also { lastUsedLabel = it.label }.text
     }
 
     override suspend fun enhanceTemplate(
@@ -45,63 +37,23 @@ class RealCaptionEnhancer @Inject constructor(
             if (wantHeading) append("HEADING: ").append(heading.trim()).append('\n')
             if (wantCaption) append("CAPTION: ").append(caption.trim())
         }.trim()
-        val reply = complete(system = buildPrompt(mood, templateMode = true), user = user)
-        val parsed = parseTemplateReply(reply, wantHeading, wantCaption, fixedLabel)
+        val reply = llm.respond(LlmTask.CAPTION, system = buildPrompt(mood, templateMode = true), user = user)
+        lastUsedLabel = reply.label
+        val parsed = parseTemplateReply(reply.text, wantHeading, wantCaption, fixedLabel)
         (parsed.heading ?: heading) to (parsed.caption ?: caption)
     }
 
-    private suspend fun complete(system: String, user: String): String {
-        require(BuildConfig.OPENAI_API_KEY.isNotBlank()) { "OPENAI_API_KEY is not set in local.properties" }
-
-        val body = JSONObject()
-            .put("model", MODEL)
-            .put(
-                "input",
-                JSONArray()
-                    .put(JSONObject().put("role", "system").put("content", system))
-                    .put(JSONObject().put("role", "user").put("content", user)),
-            )
-
-        val request = Request.Builder().url(ENDPOINT)
-            .header("Authorization", "Bearer ${BuildConfig.OPENAI_API_KEY}")
-            .header("Content-Type", "application/json")
-            .post(body.toString().toRequestBody("application/json".toMediaType()))
-            .build()
-
-        val client = okHttpClient.newBuilder().readTimeout(READ_TIMEOUT_SECONDS, TimeUnit.SECONDS).build()
-        return withContext(Dispatchers.IO) {
-            client.newCall(request).execute().use { response ->
-                val responseText = response.body?.string().orEmpty()
-                check(response.isSuccessful) { "OpenAI request failed: HTTP ${response.code}: $responseText" }
-                extractText(JSONObject(responseText))
-            }
-        }
-    }
-
-    /**
-     * The REST API has no `output_text` shortcut (that is an SDK convenience): the text lives in
-     * `output[]` items of type `message`, in `content[]` parts of type `output_text`. Reasoning
-     * items are skipped. An empty or refused result is an error, never an empty caption -- silently
-     * replacing the user's text with nothing would be worse than failing.
-     */
-    private fun extractText(json: JSONObject): String {
-        json.optJSONObject("error")?.let { error("OpenAI returned an error: ${it.optString("message", it.toString())}") }
-        if (json.optString("status") == "incomplete") error("OpenAI response was incomplete: ${json.optJSONObject("incomplete_details")}")
-
-        val output = json.optJSONArray("output") ?: error("OpenAI response had no output")
-        val text = StringBuilder()
-        for (i in 0 until output.length()) {
-            val item = output.getJSONObject(i)
-            if (item.optString("type") != "message") continue
-            val content = item.optJSONArray("content") ?: continue
-            for (j in 0 until content.length()) {
-                val part = content.getJSONObject(j)
-                when (part.optString("type")) {
-                    "output_text" -> text.append(part.optString("text"))
-                    "refusal" -> error("OpenAI declined to rewrite this caption: ${part.optString("refusal")}")
-                }
-            }
-        }
-        return text.toString().trim().ifEmpty { error("OpenAI returned an empty caption") }
+    override suspend fun variants(text: String, mood: CaptionMood, count: Int, trending: String, highQuality: Boolean): Result<CaptionVariants> = runCatching {
+        require(text.isNotBlank()) { "Nothing to rewrite" }
+        val n = count.coerceIn(MIN_VARIANTS, MAX_VARIANTS)
+        val reply = llm.respond(
+            LlmTask.CAPTION,
+            system = buildVariantsPrompt(mood, n),
+            user = variantsUserText(text, trending),
+            schema = variantsSchema(n),
+            highQuality = highQuality,
+        )
+        lastUsedLabel = reply.label
+        CaptionVariants(parseVariants(reply.text, n), reply.label)
     }
 }

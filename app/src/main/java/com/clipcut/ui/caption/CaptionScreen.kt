@@ -1,5 +1,7 @@
 package com.clipcut.ui.caption
 
+import com.clipcut.domain.api.real.MIN_VARIANTS
+import com.clipcut.domain.api.real.MAX_VARIANTS
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
@@ -157,6 +159,8 @@ fun CaptionScreen(
                 Text("Undo")
             }
         }
+
+        VariantsSection(state, viewModel)
 
         Text("Templates", style = MaterialTheme.typography.titleSmall)
         if (state.templates.isEmpty()) {
@@ -343,6 +347,59 @@ private fun MoodPicker(selected: CaptionMood, onSelect: (CaptionMood) -> Unit, e
                         }
                     }
                 }
+            }
+        }
+    }
+}
+
+/**
+ * 3 to 5 takes on the caption in the chosen mood, optionally aware of what is trending. Tapping one puts it in the
+ * caption box; Undo brings the previous one back. The heading and fixed label are left alone.
+ */
+@Composable
+private fun VariantsSection(state: CaptionUiState, viewModel: CaptionViewModel) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text("Variants", style = MaterialTheme.typography.titleSmall)
+        OutlinedTextField(
+            value = state.trending,
+            onValueChange = viewModel::setTrending,
+            label = { Text("Trending now (optional)") },
+            placeholder = { Text("e.g. #QaziBornToShine, task fight") },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+            (MIN_VARIANTS..MAX_VARIANTS).forEach { n ->
+                FilterChip(selected = state.variantCount == n, onClick = { viewModel.setVariantCount(n) }, label = { Text("$n") })
+            }
+            FilterChip(selected = state.highQuality, onClick = { viewModel.setHighQuality(!state.highQuality) }, label = { Text("Best") })
+        }
+        OutlinedButton(onClick = viewModel::makeVariants, enabled = state.canMakeVariants, modifier = Modifier.fillMaxWidth()) {
+            if (state.isMakingVariants) CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+            Text(if (state.isMakingVariants) "  Writing ${state.variantCount} variants…" else "Write ${state.variantCount} variants")
+        }
+        state.variants.forEachIndexed { i, v ->
+            Surface(
+                onClick = { viewModel.useVariant(v) },
+                color = MaterialTheme.colorScheme.surfaceVariant,
+                shape = MaterialTheme.shapes.small,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Column(modifier = Modifier.padding(12.dp)) {
+                    Text("${i + 1}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
+                    Text(v, style = MaterialTheme.typography.bodyMedium)
+                }
+            }
+        }
+        if (state.variants.isNotEmpty()) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    "Tap one to use it · by ${state.variantsLabel.orEmpty()}",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.weight(1f),
+                )
+                TextButton(onClick = viewModel::clearVariants) { Text("Clear") }
             }
         }
     }

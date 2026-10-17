@@ -2,6 +2,12 @@ package com.clipcut.ui.home
 
 import android.content.Intent
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.IntrinsicSize
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -9,25 +15,20 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -47,10 +48,20 @@ import com.clipcut.domain.api.MediaAccount
 import com.clipcut.lan.LanBufferActivity
 import com.clipcut.ui.caption.CaptionGeneratorActivity
 import com.clipcut.ui.components.Screen
-import com.clipcut.ui.components.SectionCard
+import com.clipcut.ui.components.NavTile
+import com.clipcut.ui.components.Panel
+import com.clipcut.ui.components.Pill
 import com.clipcut.ui.deletion.DeletionActivity
+import com.clipcut.ui.bossmeter.BossMeterActivity
 import com.clipcut.ui.taglines.TaglinesActivity
 import com.clipcut.ui.unfollows.UnfollowsActivity
+import com.clipcut.domain.api.Balance
+import com.clipcut.domain.api.Balances
+import com.clipcut.domain.api.XApp
+import com.clipcut.domain.api.XReadPool
+import androidx.lifecycle.viewModelScope
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.launch
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
 
@@ -59,7 +70,16 @@ class HomeViewModel @Inject constructor(
     private val counter: BbLogsCounter,
     private val selector: MediaAccountSelector,
     unfollowDao: UnfollowDao,
+    private val pool: XReadPool,
 ) : ViewModel() {
+    /** Each X app's prepaid balance, from X's own usage endpoint (free to read). */
+    val balances: StateFlow<Balances> = pool.balances
+
+    /** Re-reads the balances; without [force] at most every two minutes. */
+    fun refreshBalances(force: Boolean = false) {
+        viewModelScope.launch { pool.refreshBalances(force) }
+    }
+
     /** Today's unfollows and group kicks, live from the local log, for the Unfollowers card. */
     val unfollowSummary: Flow<UnfollowSummary> = unfollowDao.observeAll().map { UnfollowSummary.of(it) }
 
@@ -81,10 +101,12 @@ fun HomeScreen(modifier: Modifier = Modifier, viewModel: HomeViewModel = hiltVie
     var caption by remember { mutableStateOf(viewModel.nextCaption()) }
     var active by remember { mutableStateOf(viewModel.active) }
     val summary by viewModel.unfollowSummary.collectAsState(initial = UnfollowSummary.EMPTY)
+    val balances by viewModel.balances.collectAsState()
     val lifecycleOwner = LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_START) {
+                viewModel.refreshBalances()
                 caption = viewModel.nextCaption()
                 active = viewModel.active
             }
@@ -94,7 +116,8 @@ fun HomeScreen(modifier: Modifier = Modifier, viewModel: HomeViewModel = hiltVie
     }
 
     Screen(title = "X Auto", subtitle = "Bigg Boss clipping and posting", modifier = modifier) {
-        Column(modifier = Modifier.weight(1f).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Column(modifier = Modifier.weight(1f).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            CreditsStrip(balances, onRefresh = { viewModel.refreshBalances(force = true) })
             AccountSwitcher(
                 active = active,
                 onSelect = { account ->
@@ -103,39 +126,96 @@ fun HomeScreen(modifier: Modifier = Modifier, viewModel: HomeViewModel = hiltVie
                     caption = viewModel.nextCaption()
                 },
             )
-            FeatureCard(
-                title = "Clip Cut",
-                body = "Watch the live feed, mark in and out, export and post.",
-                status = "${active.label}: next post $caption",
-                onClick = { context.startActivity(Intent(context, LanBufferActivity::class.java)) },
+            ClipCutHero(account = active.label, caption = caption, onClick = { context.startActivity(Intent(context, LanBufferActivity::class.java)) })
+            TileRow(
+                { NavTile("Captions", "Write and polish a caption", onClick = { CaptionGeneratorActivity.start(context) }, modifier = it) },
+                {
+                    val kicked = summary.kickedToday > 0
+                    NavTile(
+                        "Unfollowers",
+                        "${summary.unfollowedToday} today" + if (kicked) " · ${summary.kickedToday} kicked" else "",
+                        onClick = { UnfollowsActivity.start(context) },
+                        modifier = it,
+                        accent = if (kicked) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.secondary,
+                        tint = if (kicked) MaterialTheme.colorScheme.primaryContainer else null,
+                    )
+                },
             )
-            FeatureCard(
-                title = "Caption Generator",
-                body = "Write and enhance a caption with moods and hashtags, then copy it.",
-                status = "No clip needed",
-                onClick = { CaptionGeneratorActivity.start(context) },
+            TileRow(
+                { NavTile("Boss Meter", "Hashtag votes in a thread", onClick = { BossMeterActivity.start(context) }, modifier = it) },
+                { NavTile("Taglines", "Tweets per tagline, 24 h", onClick = { TaglinesActivity.start(context) }, modifier = it) },
             )
-            UnfollowersCard(summary = summary, onClick = { UnfollowsActivity.start(context) })
-            FeatureCard(
-                title = "Tagline Counter",
-                body = "Count how many tweets used each of your taglines in the last 24 hours.",
-                status = "Reads only, about $0.01 per tagline",
-                onClick = { TaglinesActivity.start(context) },
-            )
-            FeatureCard(
-                title = "Trigger Deletion",
-                body = "Review and delete the media account's posts from a chosen time period.",
-                status = "${active.label} account only",
+            NavTile(
+                "Trigger Deletion",
+                "Review and delete posts from @${active.handle}",
                 onClick = { DeletionActivity.start(context) },
+                modifier = Modifier.fillMaxWidth(),
+                accent = MaterialTheme.colorScheme.error,
             )
         }
         Text(
-            "Personal tool. Nothing is posted or deleted without you asking.",
-            modifier = Modifier.fillMaxWidth().padding(top = 20.dp),
-            style = MaterialTheme.typography.bodySmall,
+            "Nothing is posted or deleted without you asking.",
+            modifier = Modifier.fillMaxWidth().padding(vertical = 14.dp),
+            style = MaterialTheme.typography.labelMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = TextAlign.Center,
         )
+    }
+}
+
+/** Two tiles side by side, equal width and height. */
+@Composable
+private fun TileRow(left: @Composable (Modifier) -> Unit, right: @Composable (Modifier) -> Unit) {
+    Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth().height(IntrinsicSize.Min)) {
+        left(Modifier.weight(1f).fillMaxHeight())
+        right(Modifier.weight(1f).fillMaxHeight())
+    }
+}
+
+/** The main job, given the most room: where the next clip goes and what it will be called. */
+@Composable
+private fun ClipCutHero(account: String, caption: String, onClick: () -> Unit) {
+    Panel(modifier = Modifier.fillMaxWidth(), color = MaterialTheme.colorScheme.primaryContainer, onClick = onClick) {
+        Row(modifier = Modifier.padding(horizontal = 18.dp, vertical = 18.dp), verticalAlignment = Alignment.CenterVertically) {
+            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text("Clip Cut", style = MaterialTheme.typography.headlineSmall)
+                Text("Live feed · mark in and out · export and post", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Pill("Next on $account: $caption", MaterialTheme.colorScheme.primary, modifier = Modifier.padding(top = 6.dp))
+            }
+            Text("›", style = MaterialTheme.typography.headlineMedium, color = MaterialTheme.colorScheme.primary)
+        }
+    }
+}
+
+/** The X credit left on each account's app, in one slim strip. Under $1 the amount turns red. Tap to re-check (free). */
+@Composable
+private fun CreditsStrip(b: Balances, onRefresh: () -> Unit) {
+    Panel(modifier = Modifier.fillMaxWidth(), onClick = onRefresh) {
+        Row(modifier = Modifier.padding(horizontal = 6.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+            XApp.entries.forEachIndexed { i, app ->
+                if (i > 0) Box(Modifier.width(1.dp).height(28.dp).background(MaterialTheme.colorScheme.outlineVariant))
+                val low = b.isLow(app)
+                Column(modifier = Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text(app.label.uppercase(), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(
+                        when (val bal = b.byApp[app]) {
+                            is Balance.Known -> "$" + "%.2f".format(bal.usd)
+                            is Balance.Unavailable -> "?"
+                            Balance.Unchecked -> "…"
+                            Balance.NotSetUp, null -> "–"
+                        },
+                        style = MaterialTheme.typography.titleMedium,
+                        color = if (low) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface,
+                    )
+                }
+            }
+            Text(
+                if (b.refreshing) "…" else "↻",
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(horizontal = 10.dp),
+            )
+        }
     }
 }
 
@@ -146,106 +226,30 @@ fun HomeScreen(modifier: Modifier = Modifier, viewModel: HomeViewModel = hiltVie
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun AccountSwitcher(active: MediaAccount, onSelect: (MediaAccount) -> Unit) {
-    SectionCard("Media account") {
-        SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
-            MediaAccount.entries.forEachIndexed { index, account ->
-                SegmentedButton(
-                    selected = account == active,
-                    onClick = { onSelect(account) },
-                    enabled = account.isConfigured,
-                    shape = SegmentedButtonDefaults.itemShape(index, MediaAccount.entries.size),
-                ) { Text(account.label) }
+    Panel(modifier = Modifier.fillMaxWidth()) {
+        Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text("POSTING AS", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text("@${active.handle}", style = MaterialTheme.typography.titleSmall, maxLines = 1)
+                }
+                SingleChoiceSegmentedButtonRow(modifier = Modifier.width(150.dp)) {
+                    MediaAccount.entries.forEachIndexed { index, account ->
+                        SegmentedButton(
+                            selected = account == active,
+                            onClick = { onSelect(account) },
+                            enabled = account.isConfigured,
+                            shape = SegmentedButtonDefaults.itemShape(index, MediaAccount.entries.size),
+                            icon = {},
+                        ) { Text(account.label) }
+                    }
+                }
             }
-        }
-        Text(
-            "Posts and deletions use @${active.handle}",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        MediaAccount.entries.filter { !it.isConfigured }.forEach { account ->
-            Text(
-                "${account.label} is not set up: its keys are missing from local.properties.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.error,
-            )
-        }
-    }
-}
-
-/**
- * The Unfollowers card. It shows today's two numbers at a glance and tints itself when someone was kicked out of the
- * group chat today (live) or would have been (dry run).
- */
-@Composable
-private fun UnfollowersCard(summary: UnfollowSummary, onClick: () -> Unit) {
-    val kicked = summary.kickedToday > 0
-    val container = if (kicked) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surface
-    Card(onClick = onClick, modifier = Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = container)) {
-        Column(modifier = Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Text("Unfollowers", style = MaterialTheme.typography.titleLarge)
-            Text(
-                "See who unfollowed your main account, and who was kicked out of the group chat because of it.",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.padding(top = 4.dp)) {
-                CountPill("${summary.unfollowedToday} unfollowed today", MaterialTheme.colorScheme.secondary)
-                CountPill(
-                    "${summary.kickedToday} kicked from group",
-                    if (kicked) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            if (summary.wouldKickToday > 0) {
+            MediaAccount.entries.filter { !it.isConfigured }.forEach { account ->
                 Text(
-                    "${summary.wouldKickToday} would be kicked (dry run)",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.tertiary,
-                )
-            }
-            if (summary.waiting > 0) {
-                Text(
-                    "${summary.waiting} waiting for their re-check",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun CountPill(text: String, color: Color) {
-    Surface(color = color.copy(alpha = 0.14f), shape = CircleShape) {
-        Text(text, style = MaterialTheme.typography.labelLarge, color = color, modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp))
-    }
-}
-
-@Composable
-private fun FeatureCard(title: String, body: String, status: String, onClick: () -> Unit) {
-    Card(
-        onClick = onClick,
-        modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-    ) {
-        Column(modifier = Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Text(title, style = MaterialTheme.typography.titleLarge)
-            Text(
-                body,
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 4.dp)) {
-                Surface(
-                    color = MaterialTheme.colorScheme.primary,
-                    shape = CircleShape,
-                    modifier = Modifier.size(6.dp),
-                    content = {},
-                )
-                Text(
-                    status,
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.padding(start = 8.dp),
+                    "${account.label} is not set up: its keys are missing from local.properties.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
                 )
             }
         }

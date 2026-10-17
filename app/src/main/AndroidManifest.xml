@@ -55,6 +55,23 @@
             android:exported="false"
             android:theme="@style/Theme.ClipCut" />
 
+        <!-- Boss Meter: hashtag vote counts in one post's thread. Read only. -->
+        <activity
+            android:name=".ui.bossmeter.BossMeterActivity"
+            android:exported="false"
+            android:theme="@style/Theme.ClipCut" />
+
+        <!-- Hands the results image to X's composer when sharing (the user posts it themselves). -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.files"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/share_paths" />
+        </provider>
+
         <!-- Caption and post-to-X flow, launched from LanBufferActivity after a successful export.
              Separate Activity so nothing in it can affect the export and marking flow. -->
         <activity

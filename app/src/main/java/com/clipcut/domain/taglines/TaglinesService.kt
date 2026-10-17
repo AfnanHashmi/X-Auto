@@ -27,7 +27,7 @@ class TaglinesService(
     private val nowMs: () -> Long = System::currentTimeMillis,
 ) {
     suspend fun count(taglines: List<String>): CountOutcome {
-        if (!api.isConfigured) return CountOutcome.Failed("RW's X keys are not in local.properties (X_RW_CONSUMER_KEY and X_RW_CONSUMER_SECRET).", 0)
+        if (!api.isConfigured) return CountOutcome.Failed("No X app keys are in local.properties (RW, Main or DK).", 0)
         val clean = taglines.mapNotNull(::cleanTagline).distinctBy { it.lowercase() }
         if (clean.isEmpty()) return CountOutcome.Failed("Add at least one tagline first.", 0)
         if (clean.size > MAX_TAGLINES) return CountOutcome.Failed("At most $MAX_TAGLINES taglines at a time, to keep the cost small.", 0)
@@ -52,7 +52,7 @@ class TaglinesService(
             val why = when (e.httpCode) {
                 401, 403 -> "X refused the request (HTTP ${e.httpCode}): ${e.message}"
                 429 -> "X says too many requests (HTTP 429). Wait a few minutes and try again."
-                402 -> "X says the account is out of credits (HTTP 402)."
+                402 -> "X says every account is out of credits (HTTP 402). Top up Main, RW or DK."
                 null -> "X did not reply: ${e.message}"
                 else -> "X returned HTTP ${e.httpCode}: ${e.message}"
             }
