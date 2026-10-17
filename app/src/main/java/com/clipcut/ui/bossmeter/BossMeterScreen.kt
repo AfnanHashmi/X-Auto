@@ -33,6 +33,11 @@ import com.clipcut.ui.components.WarningCard
 import com.clipcut.ui.components.Tone
 import com.clipcut.ui.publish.PublishBanner
 import com.clipcut.ui.share.ShareToX
+import com.clipcut.ui.history.ContestantDialog
+import com.clipcut.ui.history.ContestantPill
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import java.time.ZoneId
 
 @Composable
@@ -98,7 +103,7 @@ fun BossMeterScreen(
                     }
                 }
                 item { PublishBanner(publish, onRetry = viewModel::retryPublish) }
-                item { Ranking(r) }
+                item { Ranking(r, state.contestants, viewModel) }
                 item { Breakdown(r) }
                 item {
                     OutlinedButton(
@@ -131,7 +136,11 @@ fun BossMeterScreen(
 }
 
 @Composable
-private fun Ranking(r: BossMeterResult) {
+private fun Ranking(r: BossMeterResult, contestants: Map<String, String>, vm: BossMeterViewModel) {
+    var linking by remember { mutableStateOf<String?>(null) }
+    linking?.let { tag ->
+        ContestantDialog(tag, contestants[tag], vm.knownContestants(), onSave = { vm.setContestant(tag, it); linking = null }, onCancel = { linking = null })
+    }
     SectionCard("Boss Meter (share of hashtag votes)") {
         val top = r.ranked.firstOrNull()?.count?.coerceAtLeast(1L) ?: 1L
         r.ranked.forEach { t ->
@@ -141,6 +150,7 @@ private fun Ranking(r: BossMeterResult) {
                     Text("${"%,d".format(t.count)} (${"%.1f".format(r.percent(t))}%)", style = MaterialTheme.typography.bodyMedium)
                 }
                 LinearProgressIndicator(progress = { t.count.toFloat() / top }, modifier = Modifier.fillMaxWidth())
+                ContestantPill(contestants[t.tag], onClick = { linking = t.tag })
             }
         }
     }

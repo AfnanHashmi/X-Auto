@@ -17,6 +17,9 @@ import com.clipcut.domain.publish.trendPayload
 import com.clipcut.domain.api.TAGLINE_ORDER
 import com.clipcut.domain.api.XReadPool
 import com.clipcut.domain.api.paidByText
+import com.clipcut.domain.history.ContestantStore
+import com.clipcut.domain.history.HistorySummary
+import com.clipcut.domain.history.RunHistory
 import com.clipcut.domain.taglines.DeepLook
 import com.clipcut.domain.taglines.DeepLookService
 import com.clipcut.domain.taglines.DeepLookStore
@@ -62,6 +65,10 @@ data class TaglinesUiState(
     val regulars: Map<String, List<Pair<String, Int>>> = emptyMap(),
     /** Share as a long post (X Premium) with the full read-out and Deep looks; off keeps the post text to 280 characters. */
     val longPosts: Boolean = true,
+    /** Which contestant each tagline counts for in the weekly ranking. */
+    val contestants: Map<String, String> = emptyMap(),
+    /** What the history holds from the last 7 days, for the "kept for the weekly ranking" line. */
+    val collected: HistorySummary? = null,
 ) {
     val estimatedCostUsd: Double get() = estimatedCostUsd(taglines.size)
 }
@@ -75,6 +82,8 @@ class TaglinesViewModel @Inject constructor(
     private val analyst: TaglineAnalyst,
     private val deepLook: DeepLookService,
     private val deepLookStore: DeepLookStore,
+    private val history: RunHistory,
+    private val contestants: ContestantStore,
 ) : ViewModel() {
     /** Which account pays, for the cost box. Balances are re-read (free) when the box opens. */
     val payer: StateFlow<String> = pool.balances.map { pool.payerText(TAGLINE_ORDER) }
@@ -101,6 +110,33 @@ class TaglinesViewModel @Inject constructor(
 
     init {
         refreshHistory()
+        _state.value.taglines.forEach { contestants.linkIfNew(it) }
+        refreshContestants()
+    }
+
+    /** The links for the taglines on screen, and what has been kept this week. */
+    private fun refreshContestants() {
+        val weekAgo = System.currentTimeMillis() - 7 * 24 * 3_600_000L
+        _state.update { s ->
+            s.copy(
+                contestants = (s.taglines + s.report?.counts?.map { it.tagline }.orEmpty()).distinct().mapNotNull { t -> contestants.contestantFor(t)?.let { t to it } }.toMap(),
+                collected = history.summary(weekAgo),
+            )
+        }
+    }
+
+    fun setContestant(tagline: String, name: String) {
+        contestants.set(tagline, name)
+        refreshContestants()
+    }
+
+    /** Every contestant name used so far, for the link dialog. */
+    fun knownContestants(): List<String> = contestants.knownNames()
+
+    /** Positions typed when sharing are kept with the count, as facts for the ranking. */
+    fun recordTrending(reportAtMs: Long, positions: Map<String, Int>) {
+        positions.forEach { (t, p) -> history.recordTrending(reportAtMs, t, p) }
+        if (positions.isNotEmpty()) refreshContestants()
     }
 
     /** Counts of kept looks and the steady top voices per tagline, from the whole history. */
@@ -129,7 +165,9 @@ class TaglinesViewModel @Inject constructor(
 
     private fun save(list: List<String>) {
         store.saveTaglines(list)
+        list.forEach { contestants.linkIfNew(it) }
         _state.update { it.copy(taglines = list, error = null, message = null) }
+        refreshContestants()
     }
 
     /** Step one: show what it will cost. Nothing is sent yet. */
@@ -151,7 +189,9 @@ class TaglinesViewModel @Inject constructor(
             when (val out = service.count(s.taglines)) {
                 is CountOutcome.Done -> {
                     store.saveReport(out.report)
+                    history.saveTagline(out.report) // every count is kept for the timeline and the weekly ranking
                     _state.update { it.copy(running = false, report = out.report, analysis = null, deepLooks = emptyMap(), message = "Counted from X. About $${"%.3f".format(estimatedCostUsd(out.report.counts.size))} billed by X. Paid by ${paidByText(callsBefore, pool.calls.value)}.") }
+                    refreshContestants()
                     // after the result is on screen
                     try {
                         publisher.publish(trendPayload(out.report))

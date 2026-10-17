@@ -43,6 +43,8 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import com.clipcut.domain.share.PositionInput
+import com.clipcut.ui.history.ContestantDialog
+import com.clipcut.ui.history.ContestantPill
 import com.clipcut.domain.share.ShareStage
 import androidx.compose.material3.Switch
 import com.clipcut.domain.share.parsePosition
@@ -146,6 +148,7 @@ fun TaglinesScreen(
                     shareReport, dateTimeText(shareReport.fetchedAtMs, zone), zone, positions,
                     looks = state.deepLooks, readout = state.analysis, stage = stage, longPost = state.longPosts,
                 )
+                viewModel.recordTrending(shareReport.fetchedAtMs, positions)
                 ShareToX.share(context, card, zone).let { o -> if (o.error != null) viewModel.showError(o.error) else viewModel.showInfo(o.message) }
             },
         )
@@ -311,12 +314,23 @@ private fun AiReadout(state: TaglinesUiState, onAsk: () -> Unit) {
 @Composable
 private fun PhraseList(state: TaglinesUiState, vm: TaglinesViewModel) {
     var draft by remember { mutableStateOf("") }
+    var linking by remember { mutableStateOf<String?>(null) }
     SectionCard("Taglines to count") {
         state.taglines.forEach { t ->
             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-                Text(t, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
+                Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text(t, style = MaterialTheme.typography.bodyMedium)
+                    ContestantPill(state.contestants[t], onClick = { linking = t })
+                }
                 TextButton(onClick = { vm.remove(t) }, enabled = !state.running) { Text("Remove") }
             }
+        }
+        state.collected?.let { c ->
+            Text(
+                "Kept for the weekly ranking (last 7 days): ${c.taglineRuns} counts" + (if (c.trendingMarks > 0) ", ${c.trendingMarks} trending positions" else ""),
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             OutlinedTextField(draft, { draft = it }, label = { Text("Add a tagline") }, singleLine = true, modifier = Modifier.weight(1f))
@@ -332,6 +346,9 @@ private fun PhraseList(state: TaglinesUiState, vm: TaglinesViewModel) {
                 Text("Count last 24 hours (about $${"%.2f".format(state.estimatedCostUsd)})")
             }
         }
+    }
+    linking?.let { t ->
+        ContestantDialog(t, state.contestants[t], vm.knownContestants(), onSave = { vm.setContestant(t, it); linking = null }, onCancel = { linking = null })
     }
 }
 

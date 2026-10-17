@@ -18,6 +18,8 @@ import com.clipcut.domain.publish.bossPayload
 import com.clipcut.domain.api.BOSS_METER_ORDER
 import com.clipcut.domain.api.XReadPool
 import com.clipcut.domain.api.paidByText
+import com.clipcut.domain.history.ContestantStore
+import com.clipcut.domain.history.RunHistory
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.map
@@ -39,6 +41,8 @@ data class BossMeterUiState(
     val confirming: Boolean = false,
     val error: String? = null,
     val message: String? = null,
+    /** Which contestant each hashtag counts for in the weekly ranking. */
+    val contestants: Map<String, String> = emptyMap(),
 ) {
     val hashtags: List<String> get() = hashtagsFrom(hashtagText)
     val postId: String? get() = postIdFrom(link)
@@ -55,7 +59,22 @@ class BossMeterViewModel @Inject constructor(
     private val store: BossMeterStore,
     private val publisher: WebsitePublisher,
     private val pool: XReadPool,
+    private val history: RunHistory,
+    private val contestants: ContestantStore,
 ) : ViewModel() {
+
+    /** Every contestant name used so far, for the link dialog. */
+    fun knownContestants(): List<String> = contestants.knownNames()
+
+    fun setContestant(tag: String, name: String) {
+        contestants.set(tag, name)
+        refreshContestants()
+    }
+
+    private fun refreshContestants() = _state.update { s ->
+        s.copy(contestants = s.result?.tags.orEmpty().mapNotNull { t -> contestants.contestantFor(t.tag)?.let { t.tag to it } }.toMap())
+    }
+
     /** Which account pays, for the cost box. Balances are re-read (free) when the box opens. */
     val payer: StateFlow<String> = pool.balances.map { pool.payerText(BOSS_METER_ORDER) }
         .stateIn(viewModelScope, SharingStarted.Eagerly, pool.payerText(BOSS_METER_ORDER))
@@ -68,6 +87,10 @@ class BossMeterViewModel @Inject constructor(
 
     private val _state = MutableStateFlow(BossMeterUiState(link = store.link, hashtagText = store.hashtags, result = store.lastResult()))
     val state: StateFlow<BossMeterUiState> = _state.asStateFlow()
+
+    init {
+        refreshContestants()
+    }
 
     fun setLink(v: String) {
         store.link = v
@@ -104,7 +127,10 @@ class BossMeterViewModel @Inject constructor(
             when (out) {
                 is BossMeterOutcome.Done -> {
                     store.saveResult(out.result)
+                    history.saveBoss(out.result, s.link) // every run is kept for the Boss Meter timeline and the weekly ranking
+                    out.result.tags.forEach { contestants.linkIfNew(it.tag) }
                     _state.update { it.copy(running = false, progress = null, result = out.result, message = "Counted from X: ${s.calls} calls, about $${"%.3f".format(s.costUsd)}. Paid by ${paidByText(callsBefore, pool.calls.value)}.") }
+                    refreshContestants()
                     publishInBackground(out.result, s.link) // after the result is on screen
                 }
                 is BossMeterOutcome.Failed -> _state.update { it.copy(running = false, progress = null, error = out.reason) }

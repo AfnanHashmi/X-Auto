@@ -27,30 +27,10 @@ class TaglineStore @Inject constructor(@ApplicationContext context: Context) {
         get() = prefs.getBoolean("long_posts", true)
         set(v) = prefs.edit().putBoolean("long_posts", v).apply()
 
-    fun lastReport(): CountReport? = prefs.getString(KEY_REPORT, null)?.let { runCatching { decode(it) }.getOrNull() }
+    fun lastReport(): CountReport? = prefs.getString(KEY_REPORT, null)?.let { runCatching { decodeReport(it) }.getOrNull() }
 
     fun saveReport(report: CountReport) {
-        prefs.edit().putString(KEY_REPORT, encode(report)).apply()
-    }
-
-    private fun encode(r: CountReport): String = JSONObject()
-        .put("start", r.startMs).put("end", r.endMs).put("fetched", r.fetchedAtMs)
-        .put("counts", JSONArray(r.counts.map { c -> JSONObject().put("tagline", c.tagline).put("all", series(c.all)).put("originals", series(c.originals)) }))
-        .toString()
-
-    private fun series(s: CountSeries) = JSONObject().put("total", s.total)
-        .put("hours", JSONArray(s.hours.map { JSONArray(listOf(it.startMs, it.count)) }))
-
-    private fun decode(text: String): CountReport {
-        val o = JSONObject(text)
-        fun series(j: JSONObject) = CountSeries(
-            j.getLong("total"),
-            j.getJSONArray("hours").let { a -> List(a.length()) { i -> a.getJSONArray(i).let { HourBucket(it.getLong(0), it.getLong(1)) } } },
-        )
-        val counts = o.getJSONArray("counts").let { a ->
-            List(a.length()) { i -> a.getJSONObject(i).let { TaglineCount(it.getString("tagline"), series(it.getJSONObject("all")), series(it.getJSONObject("originals"))) } }
-        }
-        return CountReport(o.getLong("start"), o.getLong("end"), o.getLong("fetched"), counts)
+        prefs.edit().putString(KEY_REPORT, encodeReport(report)).apply()
     }
 
     companion object {
@@ -58,4 +38,25 @@ class TaglineStore @Inject constructor(@ApplicationContext context: Context) {
         private const val KEY_REPORT = "report"
         val DEFAULTS = listOf("STOP NEGATIVE PR AGAINST QAZI", "QAZI RISING ABOVE HATE", "QAZI BORN TO SHINE")
     }
+}
+
+/** A count as JSON, the same shape in the phone's store and in the run history. */
+fun encodeReport(r: CountReport): String = JSONObject()
+    .put("start", r.startMs).put("end", r.endMs).put("fetched", r.fetchedAtMs)
+    .put("counts", JSONArray(r.counts.map { c -> JSONObject().put("tagline", c.tagline).put("all", series(c.all)).put("originals", series(c.originals)) }))
+    .toString()
+
+private fun series(s: CountSeries) = JSONObject().put("total", s.total)
+    .put("hours", JSONArray(s.hours.map { JSONArray(listOf(it.startMs, it.count)) }))
+
+fun decodeReport(text: String): CountReport {
+    val o = JSONObject(text)
+    fun series(j: JSONObject) = CountSeries(
+        j.getLong("total"),
+        j.getJSONArray("hours").let { a -> List(a.length()) { i -> a.getJSONArray(i).let { HourBucket(it.getLong(0), it.getLong(1)) } } },
+    )
+    val counts = o.getJSONArray("counts").let { a ->
+        List(a.length()) { i -> a.getJSONObject(i).let { TaglineCount(it.getString("tagline"), series(it.getJSONObject("all")), series(it.getJSONObject("originals"))) } }
+    }
+    return CountReport(o.getLong("start"), o.getLong("end"), o.getLong("fetched"), counts)
 }
