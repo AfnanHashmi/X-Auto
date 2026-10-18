@@ -165,7 +165,7 @@ class BossMeterViewModel @Inject constructor(
             when (out) {
                 is BossMeterOutcome.Done -> {
                     store.saveResult(out.result)
-                    history.saveBoss(out.result, s.link) // every run is kept for the Boss Meter timeline and the weekly ranking
+                    history.saveBoss(out.result, s.link, s.stage.wire, s.final) // every run is kept for the Boss Meter timeline and the weekly ranking
                     out.result.tags.forEach { contestants.linkIfNew(it.tag) }
                     _state.update { it.copy(running = false, progress = null, result = out.result, message = "Counted from X: ${s.calls} calls, about $${"%.3f".format(s.costUsd)}. Paid by ${paidByText(callsBefore, pool.calls.value)}.") }
                     refreshContestants()

@@ -49,8 +49,9 @@ class TaglineAnalyst(private val llm: LlmClient) {
         previous: ReadoutRecord? = null,
         nowMs: Long = System.currentTimeMillis(),
     ): TaglineAnalysis {
-        val reply = llm.respond(LlmTask.ANALYSIS, SYSTEM, taglineFacts(report, zone, looks, history, previous), ANALYSIS_SCHEMA, highQuality)
-        return parseAnalysis(reply.text).copy(label = reply.label, costUsd = reply.costUsd, atMs = nowMs)
+        val facts = taglineFacts(report, zone, looks, history, previous)
+        val reply = llm.respond(LlmTask.ANALYSIS, SYSTEM, facts, ANALYSIS_SCHEMA, highQuality)
+        return checkNumbers(parseAnalysis(reply.text), facts).copy(label = reply.label, costUsd = reply.costUsd, atMs = nowMs)
     }
 
     private companion object {
@@ -135,4 +136,24 @@ fun parseAnalysis(json: String): TaglineAnalysis {
     val insights = o.optJSONArray("insights")?.let { a -> (0 until a.length()).map { a.optString(it).trim() }.filter { it.isNotEmpty() } }.orEmpty()
     if (insights.isEmpty()) throw LlmException("The report has no insights")
     return TaglineAnalysis(text("headline"), insights.take(5), text("momentum"), text("caption_angle"), label = "", costUsd = null)
+}
+
+private val NUMBER = Regex("""\d[\d,]*(?:\.\d+)?""")
+
+private fun numbersIn(text: String): Set<String> = NUMBER.findAll(text).map { it.value.replace(",", "").trimEnd('.') }.toSet()
+
+/**
+ * Every number the read-out quotes must be one of the figures it was given (small numbers up to 24, such as "3 taglines"
+ * or "7 PM", are always fine). A finding with a number that is not in the data is dropped; if the headline or the
+ * momentum line has one, the whole read-out is refused rather than shown. Free: nothing is sent anywhere.
+ */
+fun checkNumbers(a: TaglineAnalysis, facts: String): TaglineAnalysis {
+    val known = numbersIn(facts)
+    fun bad(text: String) = numbersIn(text).filter { n -> n !in known && (n.toDoubleOrNull() ?: 0.0) > 24.0 }
+    (bad(a.headline) + bad(a.momentum)).takeIf { it.isNotEmpty() }?.let {
+        throw LlmException("The read-out quoted numbers that are not in the data (${it.distinct().joinToString(", ")}), so it was not kept. Write it again.")
+    }
+    val kept = a.insights.filter { bad(it).isEmpty() }
+    if (kept.isEmpty()) throw LlmException("Every finding quoted numbers that are not in the data, so the read-out was not kept. Write it again.")
+    return a.copy(insights = kept)
 }

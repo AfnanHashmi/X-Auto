@@ -69,6 +69,18 @@ class AiPublishTest {
     }
 
     @Test
+    fun richerDeepLookFieldsGoAlong() {
+        val rich = LOOK.copy(starters = listOf(Voice("@first_fan", "6:31 PM")), rivals = listOf("UDITI STANDS BY HER PEOPLE"), pairedHashtags = listOf("#BiggBoss20"), size = "Max")
+        val d = deepLookJson(rich)!!
+        assertEquals("@first_fan", d.getJSONArray("starters").getJSONObject(0).getString("handle"))
+        assertEquals("6:31 PM", d.getJSONArray("starters").getJSONObject(0).getString("when"))
+        assertEquals("UDITI STANDS BY HER PEOPLE", d.getJSONArray("rivalTaglines").getString(0))
+        assertEquals("#BiggBoss20", d.getJSONArray("pairedHashtags").getString(0))
+        assertEquals("max", d.getString("size"))
+        assertFalse(deepLookJson(LOOK)!!.has("starters")) // left out when there are none
+    }
+
+    @Test
     fun bothTogetherAndNothingEmptyIsEverSent() {
         val j = send(readout = READOUT, looks = mapOf(LOOK.tagline to LOOK))
         assertTrue(j.has("readout")); assertTrue(j.getJSONArray("items").getJSONObject(0).has("deepLook"))

@@ -10,7 +10,8 @@ import org.json.JSONObject
 import java.io.File
 
 /** One Boss Meter run as kept in the history: the result and the post it was for. */
-data class BossRun(val result: BossMeterResult, val link: String)
+/** [stage] is "contestants" or "finalists" (blank for runs saved before stages existed); [final] marks the final result. */
+data class BossRun(val result: BossMeterResult, val link: String, val stage: String = "", val final: Boolean = false)
 
 /** A trending position the user typed when sharing: for which count and tagline, and when. */
 data class TrendingMark(val reportAtMs: Long, val tagline: String, val position: Int, val atMs: Long)
@@ -34,9 +35,10 @@ class RunHistory(private val dir: File, private val nowMs: () -> Long = System::
 
     fun saveTagline(report: CountReport) = write("tagline-${report.fetchedAtMs}.json", encodeReport(report))
 
-    fun saveBoss(result: BossMeterResult, link: String) = write(
+    fun saveBoss(result: BossMeterResult, link: String, stage: String = "", final: Boolean = false) = write(
         "boss-${result.fetchedAtMs}.json",
         JSONObject().put("id", result.conversationId).put("total", result.totalThread).put("fetched", result.fetchedAtMs).put("link", link)
+            .put("stage", stage).put("final", final)
             .put("tags", JSONArray(result.tags.map { JSONObject().put("tag", it.tag).put("count", it.count) })).toString(),
     )
 
@@ -56,6 +58,8 @@ class RunHistory(private val dir: File, private val nowMs: () -> Long = System::
             BossRun(
                 BossMeterResult(o.getString("id"), o.getLong("total"), List(a.length()) { i -> a.getJSONObject(i).let { TagCount(it.getString("tag"), it.getLong("count")) } }, o.getLong("fetched")),
                 o.optString("link"),
+                o.optString("stage"),
+                o.optBoolean("final"),
             )
         }.getOrNull()
     }

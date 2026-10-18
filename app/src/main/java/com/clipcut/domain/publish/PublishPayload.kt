@@ -209,7 +209,8 @@ const val MAX_WEEK_LABEL = 40
 const val MAX_TOP5_NOTE = 200
 
 /** One rank as typed: [number] and [note] may be blank. */
-data class Top5Row(val name: String, val number: String = "", val note: String = "")
+/** [number] is sent as "count" (the relevance score when attached); [facts] is a second insight line that justifies it. */
+data class Top5Row(val name: String, val number: String = "", val note: String = "", val facts: String = "")
 
 /**
  * The weekly Top 5. Empty rows are skipped; order is rank. Names are required for a row to count, at most
@@ -230,7 +231,7 @@ fun top5Payload(week: String, rows: List<Top5Row>, nowMs: Long): PublishPayload 
         }
         val note = r.note.trim().replace(Regex("\\s+"), " ")
         if (note.length > MAX_TOP5_NOTE) throw PayloadException("Rank ${i + 1}: the note is at most $MAX_TOP5_NOTE characters.")
-        MeterItem(name, number, insights = note.takeIf { it.isNotEmpty() }?.let(::listOf))
+        MeterItem(name, number, insights = cleanInsights(listOf(note, r.facts)))
     }
     val seen = HashSet<String>()
     items.forEach { if (!seen.add(it.label.lowercase())) throw PayloadException("\"${it.label}\" appears twice.") }
@@ -244,11 +245,12 @@ fun top5Payload(week: String, rows: List<Top5Row>, nowMs: Long): PublishPayload 
 // ---- AI results on a Tagline Counter run -----------------------------------------------------------------------------
 
 const val MAX_THEMES = 5
-const val MAX_VOICES = 5
+const val MAX_VOICES = 10
 const val MAX_LOOK_POSTS = 3
 const val MAX_MODEL = 60
 
 private val HANDLE = Regex("""^@[A-Za-z0-9_]{1,15}$""")
+private val HASHTAG_OUT = Regex("""^#[\p{L}\p{N}_]{2,60}$""")
 private val X_POST = Regex("""^https://x\.com/[A-Za-z0-9_]{1,15}/status/\d{5,25}$""")
 
 /** "xAI · grok-4.3 (OpenAI failed)" → ("xai", "grok-4.3"). */
@@ -290,6 +292,12 @@ fun deepLookJson(d: DeepLook, steady: List<Pair<String, Int>> = emptyList()): JS
     steady.filter { HANDLE.matches(it.first) && it.second >= 2 }.take(MAX_VOICES).takeIf { it.isNotEmpty() }?.let { st ->
         o.put("steadyVoices", JSONArray(st.map { (h, n) -> JSONObject().put("handle", h).put("looks", n) }))
     }
+    d.starters.filter { HANDLE.matches(it.handle) }.take(3).takeIf { it.isNotEmpty() }?.let { st ->
+        o.put("starters", JSONArray(st.map { v -> JSONObject().put("handle", v.handle).apply { line(v.why)?.let { put("when", it.take(60)) } } }))
+    }
+    cleanInsights(d.rivals.map { it.take(120) })?.let { o.put("rivalTaglines", JSONArray(it)) }
+    d.pairedHashtags.filter { HASHTAG_OUT.matches(it) }.take(8).takeIf { it.isNotEmpty() }?.let { o.put("pairedHashtags", JSONArray(it)) }
+    if (d.size.isNotBlank()) o.put("size", d.size.lowercase())
     if (d.postsRead > 0) o.put("postsRead", d.postsRead)
     providerAndModel(d.label)?.let { (p, m) -> o.put("provider", p).put("model", m) }
     if (d.atMs > 0) o.put("lookedAt", isoUtc(d.atMs))

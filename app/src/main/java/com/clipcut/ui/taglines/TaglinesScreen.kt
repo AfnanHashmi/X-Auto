@@ -55,6 +55,7 @@ import com.clipcut.domain.taglines.CountReport
 import com.clipcut.domain.taglines.DEEP_LOOK_DAILY_CAP_USD
 import com.clipcut.domain.taglines.DEEP_LOOK_ESTIMATE_USD
 import com.clipcut.domain.taglines.DeepLook
+import com.clipcut.domain.taglines.DeepLookSize
 import com.clipcut.domain.taglines.TaglineCount
 import com.clipcut.domain.taglines.clockText
 import com.clipcut.domain.taglines.dateTimeText
@@ -155,18 +156,33 @@ fun TaglinesScreen(
     }
 
     state.confirmDeepLook?.let { tagline ->
+        val blocked = viewModel.lookSizeBlocked()
         AlertDialog(
             onDismissRequest = viewModel::cancelDeepLook,
             title = { Text("Deep look?") },
             text = {
-                Text(
-                    "Grok (xAI) searches X and reads about 20–30 posts with \"$tagline\" from the counted period, then lists the themes, " +
-                        "the accounts with the most engagement in what it read, and posts to open.\n\n" +
-                        "About $" + "%.2f".format(DEEP_LOOK_ESTIMATE_USD) + " (xAI's real cost is shown after). Today: $" +
-                        "%.2f".format(viewModel.deepLookSpentToday()) + " of the $" + "%.2f".format(DEEP_LOOK_DAILY_CAP_USD) + " daily limit. Read only; nothing is posted.",
-                )
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text(
+                        "Grok (xAI) searches X for \"$tagline\" in the counted period and reports themes, top voices, who started it, " +
+                            "rival taglines, paired hashtags and posts to open. Bigger sizes read more posts.",
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        DeepLookSize.entries.forEach { sz ->
+                            FilterChip(selected = state.lookSize == sz, onClick = { viewModel.setLookSize(sz) }, label = { Text("${sz.label} $" + "%.2f".format(sz.budgetUsd)) })
+                        }
+                    }
+                    Text(
+                        "About ${state.lookSize.posts} posts, up to ${state.lookSize.searches} searches. xAI's real cost is shown after; it can land a little over or under. " +
+                            "Today: $" + "%.2f".format(viewModel.deepLookSpentToday()) + " of the $" + "%.2f".format(DEEP_LOOK_DAILY_CAP_USD) + " daily limit. Read only; nothing is posted.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    blocked?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }
+                }
             },
-            confirmButton = { Button(onClick = viewModel::confirmDeepLook) { Text("Look (about $" + "%.2f".format(DEEP_LOOK_ESTIMATE_USD) + ")") } },
+            confirmButton = {
+                Button(onClick = viewModel::confirmDeepLook, enabled = blocked == null) { Text("Look (about $" + "%.2f".format(state.lookSize.budgetUsd) + ")") }
+            },
             dismissButton = { TextButton(onClick = viewModel::cancelDeepLook) { Text("Cancel") } },
         )
     }
@@ -394,7 +410,7 @@ private fun TaglineCard(
                     CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
                     Text("  Grok is reading posts…")
                 } else {
-                    Text((if (look != null) "Look again: what's new" else "Deep look: top voices and themes") + " (about $" + "%.2f".format(DEEP_LOOK_ESTIMATE_USD) + ")")
+                    Text((if (look != null) "Look again: what's new" else "Deep look: top voices and themes") + " (from $" + "%.2f".format(DEEP_LOOK_ESTIMATE_USD) + ")")
                 }
             }
         }
@@ -459,6 +475,18 @@ private fun DeepLookSection(look: DeepLook, lookCount: Int, regulars: List<Pair<
                 }
             }
         }
+        if (look.starters.isNotEmpty()) {
+            Text(
+                "Started by: " + look.starters.joinToString(", ") { v -> v.handle + (v.why.takeIf { it.isNotBlank() }?.let { " ($it)" } ?: "") },
+                style = MaterialTheme.typography.bodySmall,
+            )
+        }
+        if (look.rivals.isNotEmpty()) {
+            Text("Rivals pushing at the same time: " + look.rivals.joinToString(", "), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        if (look.pairedHashtags.isNotEmpty()) {
+            Text("Used with: " + look.pairedHashtags.joinToString(" "), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
         if (regulars.isNotEmpty()) {
             Text(
                 "Steady drivers: " + regulars.take(5).joinToString(", ") { (h, n) -> "$h ($n looks)" },
@@ -472,7 +500,7 @@ private fun DeepLookSection(look: DeepLook, lookCount: Int, regulars: List<Pair<
             }
         }
         Text(
-            "Grok (${look.label}) read ${look.postsRead} posts: a sample, not all of them" +
+            "Grok (${look.label}" + (look.size.takeIf { it.isNotBlank() }?.let { ", $it" } ?: "") + ") read ${look.postsRead} posts: a sample, not all of them" +
                 (look.costUsd?.let { ". Cost $" + "%.3f".format(it) } ?: "") + ".",
             style = MaterialTheme.typography.labelMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,

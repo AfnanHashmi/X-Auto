@@ -21,6 +21,7 @@ import com.clipcut.domain.history.ContestantStore
 import com.clipcut.domain.history.HistorySummary
 import com.clipcut.domain.history.RunHistory
 import com.clipcut.domain.taglines.DeepLook
+import com.clipcut.domain.taglines.DeepLookSize
 import com.clipcut.domain.taglines.DeepLookService
 import com.clipcut.domain.taglines.DeepLookStore
 import com.clipcut.domain.taglines.ReadoutRecord
@@ -60,6 +61,8 @@ data class TaglinesUiState(
     val deepLooking: String? = null,
     /** The tagline whose Deep look cost box is open. */
     val confirmDeepLook: String? = null,
+    /** The Deep look size chosen in the cost box. */
+    val lookSize: DeepLookSize = DeepLookSize.STANDARD,
     /** How many Deep looks are kept per tagline (all counts), and the accounts that keep coming up as top voices. */
     val lookCounts: Map<String, Int> = emptyMap(),
     val regulars: Map<String, List<Pair<String, Int>>> = emptyMap(),
@@ -255,9 +258,15 @@ class TaglinesViewModel @Inject constructor(
     fun askDeepLook(tagline: String) {
         val s = _state.value
         if (s.report == null || s.deepLooking != null) return
-        deepLook.blockedReason()?.let { r -> _state.update { it.copy(error = r, message = null) }; return }
+        // The smallest size must fit today's limit; a bigger one is checked when chosen.
+        deepLook.blockedReason(DeepLookSize.STANDARD)?.let { r -> _state.update { it.copy(error = r, message = null) }; return }
         _state.update { it.copy(confirmDeepLook = tagline, error = null, message = null) }
     }
+
+    fun setLookSize(size: DeepLookSize) = _state.update { it.copy(lookSize = size) }
+
+    /** Why the chosen size cannot run today, or null. */
+    fun lookSizeBlocked(): String? = deepLook.blockedReason(_state.value.lookSize)
 
     fun cancelDeepLook() = _state.update { it.copy(confirmDeepLook = null) }
 
@@ -270,7 +279,7 @@ class TaglinesViewModel @Inject constructor(
         viewModelScope.launch {
             try {
                 // Earlier looks at this tagline go along, so Grok reads fresh posts and says what changed.
-                val look = deepLook.look(tagline, report, previous = deepLookStore.history(tagline))
+                val look = deepLook.look(tagline, report, previous = deepLookStore.history(tagline), size = s.lookSize)
                 deepLookStore.addLook(look) // always kept, even if a new count arrived meanwhile
                 if (_state.value.report?.fetchedAtMs == report.fetchedAtMs) {
                     _state.update { it.copy(deepLooking = null, deepLooks = it.deepLooks + (tagline to look)) }

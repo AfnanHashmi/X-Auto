@@ -74,7 +74,7 @@ class DeepLookTest {
         assertEquals("x_search", tool.getString("type"))
         assertEquals("2026-10-16", tool.getString("from_date"))
         assertEquals("2026-10-18", tool.getString("to_date")) // the end day (17th) is always included
-        assertEquals(2, body.getInt("max_turns"))
+        assertEquals(DeepLookSize.STANDARD.searches, body.getInt("max_turns"))
         assertEquals(0.10464935, look.costUsd!!, 1e-9) // xAI's own figure
         assertEquals("xAI · grok-4.3", look.label)
     }
@@ -91,9 +91,10 @@ class DeepLookTest {
     fun theDailyCapStopsBeforeSpendingAndCountsRealCosts() = runTest {
         val ledger = MemLedger()
         val s = service(Http(), ledger)
-        repeat(9) { s.look("T", report()) } // 9 × $0.105 = $0.94
-        assertEquals(0.942, s.spentToday(), 0.001)
-        assertTrue(s.blockedReason()!!.startsWith("Today's Deep look limit is reached")) // $0.94 + $0.12 estimate > $1.00
+        repeat(26) { s.look("T", report()) } // 26 × $0.105 = $2.72
+        assertEquals(2.721, s.spentToday(), 0.001)
+        assertTrue(s.blockedReason()!!.startsWith("A Standard Deep look")) // $2.72 + $0.30 > $3.00
+        assertTrue(s.blockedReason(DeepLookSize.FULL)!!.contains("Try a smaller size"))
         val http = Http()
         assertThrows(LlmException::class.java) { runBlocking { service(http, ledger).look("T", report()) } }
         assertTrue(http.sent.isEmpty()) // refused before any call
@@ -101,6 +102,32 @@ class DeepLookTest {
         val noCost = MemLedger()
         service(Http(xaiReply(GOOD).let { JSONObject(it).apply { getJSONObject("usage").remove("cost_in_usd_ticks") }.toString() }), noCost).look("T", report())
         assertEquals(DEEP_LOOK_ESTIMATE_USD, noCost.spentOn(LocalDate.of(2026, 10, 18)), 1e-9)
+    }
+
+    @Test
+    fun biggerSizesAskForMoreAndAFullLookIsBlockedNearTheCap() = runTest {
+        val http = Http()
+        val ledger = MemLedger()
+        service(http, ledger).look("T", report(), size = DeepLookSize.FULL)
+        val body = http.sent.single().second
+        assertEquals(18, body.getInt("max_turns"))
+        assertTrue(body.getJSONArray("input").getJSONObject(0).getString("content").contains("Read about 170 posts"))
+        ledger.add(LocalDate.of(2026, 10, 18), 2.0) // $2.10 spent: a Full ($1.00) would pass $3, a Max ($0.50) would not
+        val s = service(Http(), ledger)
+        assertTrue(s.blockedReason(DeepLookSize.FULL) != null); assertNull(s.blockedReason(DeepLookSize.MAX))
+    }
+
+    @Test
+    fun theRicherFieldsAreCheckedLikeTheRest() {
+        val d = parseDeepLook(
+            """{"posts_read":52,"themes":["T"],"top_voices":[],"example_posts":[],"changes":"",
+               "starters":[{"handle":"@first_fan","when":"6:31 PM"},{"handle":"bad handle!","when":"x"}],
+               "rival_taglines":["UDITI STANDS BY HER PEOPLE","T"],"paired_hashtags":["#BiggBoss20","BB20","#not valid"]}""",
+            "T",
+        )
+        assertEquals(listOf(Voice("@first_fan", "6:31 PM")), d.starters)
+        assertEquals(listOf("UDITI STANDS BY HER PEOPLE"), d.rivals) // the tagline itself is not its own rival
+        assertEquals(listOf("#BiggBoss20", "#BB20"), d.pairedHashtags)
     }
 
     @Test

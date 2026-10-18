@@ -92,6 +92,8 @@ class DeepLookStore(context: Context) : DeepLookLedger {
         .put("cost", d.costUsd ?: -1.0).put("changes", d.changes).put("report", d.reportAtMs)
         .put("themes", JSONArray(d.themes)).put("posts_urls", JSONArray(d.examplePosts))
         .put("voices", JSONArray(d.voices.map { JSONObject().put("h", it.handle).put("w", it.why) }))
+        .put("starters", JSONArray(d.starters.map { JSONObject().put("h", it.handle).put("w", it.why) }))
+        .put("rivals", JSONArray(d.rivals)).put("paired", JSONArray(d.pairedHashtags)).put("size", d.size)
 
     private fun decodeLook(o: JSONObject): DeepLook {
         fun strs(k: String) = o.getJSONArray(k).let { a -> List(a.length()) { a.getString(it) } }
@@ -106,6 +108,10 @@ class DeepLookStore(context: Context) : DeepLookLedger {
             atMs = o.getLong("at"),
             changes = o.optString("changes"),
             reportAtMs = o.optLong("report"),
+            starters = o.optJSONArray("starters")?.let { a -> List(a.length()) { a.getJSONObject(it).let { v -> Voice(v.getString("h"), v.getString("w")) } } }.orEmpty(),
+            rivals = o.optJSONArray("rivals")?.let { a -> List(a.length()) { a.getString(it) } }.orEmpty(),
+            pairedHashtags = o.optJSONArray("paired")?.let { a -> List(a.length()) { a.getString(it) } }.orEmpty(),
+            size = o.optString("size"),
         )
     }
 
