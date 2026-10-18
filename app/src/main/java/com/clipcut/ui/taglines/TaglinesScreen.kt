@@ -6,6 +6,8 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -71,6 +73,7 @@ import java.time.ZoneId
 
 private val SERIES = listOf(Color(0xFF5B9BD5), Color(0xFFE07A5F), Color(0xFF6BBF8A), Color(0xFFF2B84B), Color(0xFFB39DDB))
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun TaglinesScreen(
     modifier: Modifier = Modifier,
@@ -166,9 +169,13 @@ fun TaglinesScreen(
                         "Grok (xAI) searches X for \"$tagline\" in the counted period and reports themes, top voices, who started it, " +
                             "rival taglines, paired hashtags and posts to open. Bigger sizes read more posts.",
                     )
-                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                         DeepLookSize.entries.forEach { sz ->
-                            FilterChip(selected = state.lookSize == sz, onClick = { viewModel.setLookSize(sz) }, label = { Text("${sz.label} $" + "%.2f".format(sz.budgetUsd)) })
+                            FilterChip(
+                                selected = state.lookSize == sz,
+                                onClick = { viewModel.setLookSize(sz) },
+                                label = { Text("${sz.label} $" + "%.2f".format(sz.budgetUsd), maxLines = 1, softWrap = false) },
+                            )
                         }
                     }
                     Text(

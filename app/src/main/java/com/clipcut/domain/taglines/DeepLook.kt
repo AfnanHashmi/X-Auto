@@ -16,15 +16,15 @@ import java.time.ZoneOffset
 data class Voice(val handle: String, val why: String)
 
 /**
- * How much a Deep look may read. Measured on 2026-10-18: about $0.0058 per post read (posts plus Grok reading them) and
- * about 9 posts per search, plus a fixed ~$0.01. Grok decides the exact number of posts itself; [searches] caps its
- * search rounds and the instructions ask for about [posts], so the real cost lands near [budgetUsd], sometimes a little
- * over or under. xAI's own figure is shown after every run.
+ * How much a Deep look may read. Measured on 2026-10-18: a Standard look asked for ~50 posts, read 28 and cost $0.22 (about
+ * $0.0078 a post). Grok reads only about 55% of what it is asked for, so [posts] is what is asked, not what is read: the
+ * real cost should land near [budgetUsd], sometimes under or over. [searches] caps its search rounds. xAI's own figure
+ * and the posts actually read are shown after every run.
  */
 enum class DeepLookSize(val label: String, val budgetUsd: Double, val posts: Int, val searches: Int, val voices: Int) {
-    STANDARD("Standard", 0.30, 50, 6, 8),
-    MAX("Max", 0.50, 85, 10, 10),
-    FULL("Full", 1.00, 170, 18, 10),
+    STANDARD("Standard", 0.30, 70, 6, 8),
+    MAX("Max", 0.50, 115, 10, 10),
+    FULL("Full", 1.00, 235, 18, 10),
 }
 
 /**

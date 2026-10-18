@@ -111,7 +111,7 @@ class DeepLookTest {
         service(http, ledger).look("T", report(), size = DeepLookSize.FULL)
         val body = http.sent.single().second
         assertEquals(18, body.getInt("max_turns"))
-        assertTrue(body.getJSONArray("input").getJSONObject(0).getString("content").contains("Read about 170 posts"))
+        assertTrue(body.getJSONArray("input").getJSONObject(0).getString("content").contains("Read about 235 posts"))
         ledger.add(LocalDate.of(2026, 10, 18), 2.0) // $2.10 spent: a Full ($1.00) would pass $3, a Max ($0.50) would not
         val s = service(Http(), ledger)
         assertTrue(s.blockedReason(DeepLookSize.FULL) != null); assertNull(s.blockedReason(DeepLookSize.MAX))
