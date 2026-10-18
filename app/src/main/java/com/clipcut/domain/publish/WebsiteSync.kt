@@ -40,13 +40,21 @@ class WebsiteSync @Inject constructor(
         }
     }
 
-    fun sendBoss(): SyncResult {
+    /**
+     * Re-sends the latest Boss Meter run. With [stage] and [final] given (the choices on the Boss Meter screen) the run is
+     * sent as that: marking the saved run as the final result needs no recount. They are saved with the run, so later
+     * re-sends (the home buttons) keep them. Without them, the run goes as it was counted.
+     */
+    fun sendBoss(stage: BossStage? = null, final: Boolean? = null): SyncResult {
         val result = boss.lastResult() ?: return SyncResult.Nothing("No Boss Meter run yet. Count first.")
         val run = history.bossRuns().lastOrNull { it.result.fetchedAtMs == result.fetchedAtMs }
         val link = run?.link?.takeIf { it.isNotBlank() } ?: boss.link
-        val stage = BossStage.from(run?.stage) ?: BossStage.from(boss.stage)
+        val useStage = stage ?: BossStage.from(run?.stage) ?: BossStage.from(boss.stage)
+        val useFinal = final ?: (run?.final == true)
         return try {
-            publisher.publish(bossPayload(result, link, stage, run?.final == true, withInsights = true))
+            val payload = bossPayload(result, link, useStage, useFinal, withInsights = true)
+            history.saveBoss(result, link, useStage?.wire.orEmpty(), useFinal)
+            publisher.publish(payload)
             SyncResult.Queued
         } catch (e: PayloadException) {
             val why = e.message ?: "The website cannot take this result."

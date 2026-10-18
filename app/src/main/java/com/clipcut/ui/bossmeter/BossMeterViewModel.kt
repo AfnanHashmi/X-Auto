@@ -72,9 +72,14 @@ class BossMeterViewModel @Inject constructor(
 ) : ViewModel() {
     /** Sends the latest run (stage, final flag, insights) to the website again. No X calls, no cost. */
     fun sendToWebsite() {
-        when (val r = sync.sendBoss()) {
+        val s = _state.value
+        finalInFlight = s.final // the switch goes off once this send is on the website
+        when (val r = sync.sendBoss(s.stage, s.final)) {
             SyncResult.Queued -> Unit // the banner shows Updating / Website updated / Not updated
-            is SyncResult.Nothing -> _state.update { it.copy(error = r.reason, message = null) }
+            is SyncResult.Nothing -> {
+                finalInFlight = false
+                _state.update { it.copy(error = r.reason, message = null) }
+            }
         }
     }
 
