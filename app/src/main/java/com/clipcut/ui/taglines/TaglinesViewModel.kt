@@ -194,7 +194,7 @@ class TaglinesViewModel @Inject constructor(
                     refreshContestants()
                     // after the result is on screen
                     try {
-                        publisher.publish(trendPayload(out.report))
+                        publisher.publish(trendPayload(out.report, ZoneId.systemDefault()))
                     } catch (e: PayloadException) {
                         publisher.reject(MeterKind.TREND, e.message ?: "The website cannot take this result.")
                     }

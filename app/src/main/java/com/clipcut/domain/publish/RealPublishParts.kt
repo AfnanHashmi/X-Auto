@@ -34,6 +34,8 @@ class OkHttpWebsiteHttp(base: OkHttpClient, private val url: String = PUBLISH_UR
         client.newCall(request).execute().use { response ->
             val text = response.body?.string().orEmpty()
             val detail = runCatching { JSONObject(text).let { it.optString("error").ifBlank { it.optString("message") } } }.getOrDefault("")
+            // The website's own answer (never the request, so never the key), for `adb logcat -s Publish`.
+            android.util.Log.i("Publish", "HTTP ${response.code}: ${text.take(300).replace(key, "***")}")
             WebsiteReply(response.code, detail)
         }
     }

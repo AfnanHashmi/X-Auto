@@ -60,6 +60,10 @@
             android:name=".ui.bossmeter.BossMeterActivity"
             android:exported="false"
             android:theme="@style/Theme.ClipCut" />
+        <activity
+            android:name=".ui.top5.Top5Activity"
+            android:exported="false"
+            android:theme="@style/Theme.ClipCut" />
 
         <!-- Hands the results image to X's composer when sharing (the user posts it themselves). -->
         <provider

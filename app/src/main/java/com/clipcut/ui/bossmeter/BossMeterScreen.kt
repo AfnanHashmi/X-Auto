@@ -24,6 +24,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import com.clipcut.domain.bossmeter.BossMeterResult
+import com.clipcut.domain.publish.BossStage
+import androidx.compose.material3.SegmentedButton
 import com.clipcut.domain.share.bossMeterShare
 import com.clipcut.domain.taglines.dateTimeText
 import com.clipcut.ui.components.Screen
@@ -82,6 +84,7 @@ fun BossMeterScreen(
                         )
                         OutlinedButton(onClick = viewModel::fixLookalikes, modifier = Modifier.fillMaxWidth()) { Text("Fix the spelling") }
                     }
+                    RoundStage(state, viewModel)
                     if (state.running) {
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                             CircularProgressIndicator(modifier = Modifier.size(22.dp), strokeWidth = 2.dp)
@@ -167,5 +170,44 @@ private fun Breakdown(r: BossMeterResult) {
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
+    }
+}
+
+/**
+ * Which post of the round is being counted, for the website: the 5 contestants' post or the finalists'. "Final result"
+ * marks the finalists' run as the end of the round (the website shows the winner and the margin); it switches itself off
+ * once that run is on the website.
+ */
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+@Composable
+private fun RoundStage(state: BossMeterUiState, vm: BossMeterViewModel) {
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Text("ROUND STAGE", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        androidx.compose.material3.SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+            BossStage.entries.forEachIndexed { i, st ->
+                SegmentedButton(
+                    selected = state.stage == st,
+                    onClick = { vm.setStage(st) },
+                    enabled = !state.running,
+                    shape = androidx.compose.material3.SegmentedButtonDefaults.itemShape(i, BossStage.entries.size),
+                    icon = {},
+                ) { Text(st.label) }
+            }
+        }
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text("Final result", style = MaterialTheme.typography.titleSmall)
+                Text(
+                    if (state.stage == BossStage.FINALISTS) "The website shows the highest count as the winner, with the margin." else "Only for the finalists' post.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            androidx.compose.material3.Switch(
+                checked = state.final,
+                onCheckedChange = vm::setFinal,
+                enabled = state.stage == BossStage.FINALISTS && !state.running,
+            )
+        }
     }
 }

@@ -122,7 +122,7 @@ class WebsitePublisher(
             null -> "Could not reach the website."
             else -> "The website answered HTTP $c."
         }
-        val d = r.detail.replace(key, "***").trim().take(120)
+        val d = r.detail.replace(key, "***").trim().take(200)
         return if (d.isEmpty()) base else "$base $d"
     }
 }

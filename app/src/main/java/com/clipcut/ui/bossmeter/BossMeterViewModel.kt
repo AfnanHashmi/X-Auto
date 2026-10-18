@@ -20,6 +20,7 @@ import com.clipcut.domain.api.XReadPool
 import com.clipcut.domain.api.paidByText
 import com.clipcut.domain.history.ContestantStore
 import com.clipcut.domain.history.RunHistory
+import com.clipcut.domain.publish.BossStage
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.map
@@ -43,6 +44,10 @@ data class BossMeterUiState(
     val message: String? = null,
     /** Which contestant each hashtag counts for in the weekly ranking. */
     val contestants: Map<String, String> = emptyMap(),
+    /** Which post of the round this is, sent to the website as "stage". */
+    val stage: BossStage = BossStage.CONTESTANTS,
+    /** Marks the finalists' run as the final result. Only with [BossStage.FINALISTS]; switches itself off once published. */
+    val final: Boolean = false,
 ) {
     val hashtags: List<String> get() = hashtagsFrom(hashtagText)
     val postId: String? get() = postIdFrom(link)
@@ -85,21 +90,54 @@ class BossMeterViewModel @Inject constructor(
 
     fun retryPublish() = publisher.retry(MeterKind.BOSS)
 
-    private val _state = MutableStateFlow(BossMeterUiState(link = store.link, hashtagText = store.hashtags, result = store.lastResult()))
+    private val _state = MutableStateFlow(
+        BossMeterUiState(
+            link = store.link,
+            hashtagText = store.hashtags,
+            result = store.lastResult(),
+            stage = BossStage.from(store.stage) ?: BossStage.defaultFor(hashtagsFrom(store.hashtags).size),
+        ),
+    )
+
+    /** Set while a "final" run is on its way to the website: the switch goes off when that publish succeeds. */
+    private var finalInFlight = false
     val state: StateFlow<BossMeterUiState> = _state.asStateFlow()
 
     init {
         refreshContestants()
+        viewModelScope.launch {
+            publisher.status.collect { st ->
+                when (st.getValue(MeterKind.BOSS)) {
+                    is PublishStatus.Done -> if (finalInFlight) {
+                        finalInFlight = false
+                        _state.update { it.copy(final = false) }
+                    }
+                    is PublishStatus.Failed -> Unit // the switch stays on; Retry resends the same final run
+                    else -> Unit
+                }
+            }
+        }
     }
+
+    fun setStage(stage: BossStage) {
+        store.stage = stage.wire
+        _state.update { it.copy(stage = stage, final = it.final && stage == BossStage.FINALISTS) }
+    }
+
+    fun setFinal(on: Boolean) = _state.update { it.copy(final = on && it.stage == BossStage.FINALISTS) }
 
     fun setLink(v: String) {
         store.link = v
         _state.update { it.copy(link = v, error = null) }
     }
 
+    /** When the number of hashtags crosses 2 (finalists) or back, the Round stage follows; a choice made by hand stays otherwise. */
     fun setHashtags(v: String) {
         store.hashtags = v
+        val before = _state.value.hashtags.size
+        val after = hashtagsFrom(v).size
         _state.update { it.copy(hashtagText = v, error = null) }
+        if ((before == 2) != (after == 2)) setStage(BossStage.defaultFor(after))
     }
 
     /** Replaces each suspect spelling with the suggestion. Only runs when the user taps Fix. */
@@ -131,7 +169,7 @@ class BossMeterViewModel @Inject constructor(
                     out.result.tags.forEach { contestants.linkIfNew(it.tag) }
                     _state.update { it.copy(running = false, progress = null, result = out.result, message = "Counted from X: ${s.calls} calls, about $${"%.3f".format(s.costUsd)}. Paid by ${paidByText(callsBefore, pool.calls.value)}.") }
                     refreshContestants()
-                    publishInBackground(out.result, s.link) // after the result is on screen
+                    publishInBackground(out.result, s.link, s.stage, s.final) // after the result is on screen
                 }
                 is BossMeterOutcome.Failed -> _state.update { it.copy(running = false, progress = null, error = out.reason) }
             }
@@ -139,9 +177,11 @@ class BossMeterViewModel @Inject constructor(
     }
 
     /** Hands the result to the publisher and moves on at once; the publisher does the sending on its own scope. */
-    private fun publishInBackground(result: BossMeterResult, link: String) {
+    private fun publishInBackground(result: BossMeterResult, link: String, stage: BossStage, final: Boolean) {
         try {
-            publisher.publish(bossPayload(result, link))
+            val payload = bossPayload(result, link, stage, final, withInsights = true)
+            finalInFlight = final
+            publisher.publish(payload)
         } catch (e: PayloadException) {
             publisher.reject(MeterKind.BOSS, e.message ?: "The website cannot take this result.")
         }

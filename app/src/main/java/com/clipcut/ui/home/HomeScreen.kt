@@ -54,6 +54,7 @@ import com.clipcut.ui.components.Pill
 import com.clipcut.ui.deletion.DeletionActivity
 import com.clipcut.ui.bossmeter.BossMeterActivity
 import com.clipcut.ui.taglines.TaglinesActivity
+import com.clipcut.ui.top5.Top5Activity
 import com.clipcut.ui.unfollows.UnfollowsActivity
 import com.clipcut.domain.api.Balance
 import com.clipcut.domain.api.Balances
@@ -145,6 +146,7 @@ fun HomeScreen(modifier: Modifier = Modifier, viewModel: HomeViewModel = hiltVie
                 { NavTile("Boss Meter", "Hashtag votes in a thread", onClick = { BossMeterActivity.start(context) }, modifier = it) },
                 { NavTile("Taglines", "Tweets per tagline, 24 h", onClick = { TaglinesActivity.start(context) }, modifier = it) },
             )
+            NavTile("Top 5 of the week", "Weekly ranking for the website", onClick = { Top5Activity.start(context) }, modifier = Modifier.fillMaxWidth(), accent = MaterialTheme.colorScheme.tertiary)
             NavTile(
                 "Trigger Deletion",
                 "Review and delete posts from @${active.handle}",

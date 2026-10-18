@@ -16,6 +16,11 @@ class BossMeterStore @Inject constructor(@ApplicationContext context: Context) {
         get() = prefs.getString("link", "").orEmpty()
         set(v) = prefs.edit().putString("link", v).apply()
 
+    /** The last "Round stage" choice ("contestants" or "finalists"); blank before the first. */
+    var stage: String
+        get() = prefs.getString("stage", "").orEmpty()
+        set(v) = prefs.edit().putString("stage", v).apply()
+
     var hashtags: String
         get() = prefs.getString("hashtags", "").orEmpty()
         set(v) = prefs.edit().putString("hashtags", v).apply()
