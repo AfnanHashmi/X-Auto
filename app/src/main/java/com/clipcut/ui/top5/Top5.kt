@@ -120,7 +120,7 @@ class Top5ViewModel @Inject constructor(
         val now = System.currentTimeMillis()
         val from = weekStart(now, ZoneId.systemDefault())
         val links = contestants.snapshot()
-        val scores = relevance(weekStats(history, { text -> links[com.clipcut.domain.history.contestantKey(text)] }, from, now))
+        val scores = relevance(weekStats(history, { text -> links[com.clipcut.domain.history.contestantKey(text)] ?: contestants.resolve(text) }, from, now))
         _state.update { it.copy(scores = scores, weekFromMs = from) }
     }
 

@@ -51,11 +51,31 @@ class ContestantStore(context: Context) {
         prefs.edit().putString("map", m.toString()).apply()
     }
 
-    /** Every name used so far, for suggestions and quick picks. */
-    fun knownNames(): List<String> = all().let { m -> m.keys().asSequence().map { m.getString(it) }.distinct().sorted().toList() }
+    /** The roster first, then any other name used so far: quick picks and suggestions. */
+    fun knownNames(): List<String> =
+        (ROSTER.map { it.name } + all().let { m -> m.keys().asSequence().map { m.getString(it) }.toList() }).distinct()
 
-    /** Links [text] to the suggested name if it has no link yet. Returns the name it is linked to now, if any. */
-    fun linkIfNew(text: String): String? = contestantFor(text) ?: suggestContestant(text, knownNames())?.also { set(text, it) }
+    /** Who [text] is for: a link the user made, else the roster, else a guess from the words. Nothing is saved. */
+    fun resolve(text: String): String? = contestantFor(text) ?: rosterMatch(text)?.name ?: suggestContestant(text, knownNames())
+
+    /** Links [text] to [resolve]'s answer if it has no link yet. Returns the name it is linked to now, if any. */
+    fun linkIfNew(text: String): String? = contestantFor(text) ?: resolve(text)?.also { set(text, it) }
+
+    /** Old links used short names ("Qazi"); where the roster knows the person, they now use the full name. */
+    private fun migrate() {
+        val m = all()
+        var changed = false
+        for (k in m.keys().asSequence().toList()) {
+            val old = m.getString(k)
+            val full = rosterMatch(old)?.name
+            if (full != null && full != old && ROSTER.none { it.name == old }) { m.put(k, full); changed = true }
+        }
+        if (changed) prefs.edit().putString("map", m.toString()).apply()
+    }
+
+    init {
+        migrate()
+    }
 
     /** Every link, for reading the history by contestant. */
     fun snapshot(): Map<String, String> = all().let { m -> m.keys().asSequence().associateWith { m.getString(it) } }
