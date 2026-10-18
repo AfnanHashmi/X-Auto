@@ -25,6 +25,7 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import com.clipcut.domain.bossmeter.BossMeterResult
 import com.clipcut.domain.publish.BossStage
+import com.clipcut.domain.publish.PublishStatus
 import androidx.compose.material3.SegmentedButton
 import com.clipcut.domain.share.bossMeterShare
 import com.clipcut.domain.taglines.dateTimeText
@@ -105,7 +106,19 @@ fun BossMeterScreen(
                         Text("Post ${r.conversationId}, replies from the last 7 days.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
-                item { PublishBanner(publish, onRetry = viewModel::retryPublish) }
+                item {
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        PublishBanner(publish, onRetry = viewModel::retryPublish)
+                        OutlinedButton(onClick = viewModel::sendToWebsite, enabled = publish != PublishStatus.Sending, modifier = Modifier.fillMaxWidth()) {
+                            Text("↻ Send latest run to website")
+                        }
+                        Text(
+                            "Sends what is already here (votes, stage, insights). No X calls, no cost.",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
                 item { Ranking(r, state.contestants, viewModel) }
                 item { Breakdown(r) }
                 item {

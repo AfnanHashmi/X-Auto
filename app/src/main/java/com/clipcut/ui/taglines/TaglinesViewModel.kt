@@ -18,6 +18,8 @@ import com.clipcut.domain.api.TAGLINE_ORDER
 import com.clipcut.domain.api.XReadPool
 import com.clipcut.domain.api.paidByText
 import com.clipcut.domain.history.ContestantStore
+import com.clipcut.domain.publish.SyncResult
+import com.clipcut.domain.publish.WebsiteSync
 import com.clipcut.domain.history.HistorySummary
 import com.clipcut.domain.history.RunHistory
 import com.clipcut.domain.taglines.DeepLook
@@ -87,7 +89,16 @@ class TaglinesViewModel @Inject constructor(
     private val deepLookStore: DeepLookStore,
     private val history: RunHistory,
     private val contestants: ContestantStore,
+    private val sync: WebsiteSync,
 ) : ViewModel() {
+    /** Sends the latest run (with its AI read-out and Deep looks) to the website again. No X calls, no cost. */
+    fun sendToWebsite() {
+        when (val r = sync.sendTagline()) {
+            SyncResult.Queued -> Unit // the banner shows Updating / Website updated / Not updated
+            is SyncResult.Nothing -> _state.update { it.copy(error = r.reason, message = null) }
+        }
+    }
+
     /** Which account pays, for the cost box. Balances are re-read (free) when the box opens. */
     val payer: StateFlow<String> = pool.balances.map { pool.payerText(TAGLINE_ORDER) }
         .stateIn(viewModelScope, SharingStarted.Eagerly, pool.payerText(TAGLINE_ORDER))

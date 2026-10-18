@@ -15,9 +15,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -33,12 +31,10 @@ import com.clipcut.domain.history.ContestantStore
 import com.clipcut.domain.history.RELEVANCE_WEIGHTS
 import com.clipcut.domain.history.Relevance
 import com.clipcut.domain.history.RunHistory
+import com.clipcut.domain.history.contestantKey
 import com.clipcut.domain.history.relevance
 import com.clipcut.domain.history.weekStart
 import com.clipcut.domain.history.weekStats
-import com.clipcut.domain.publish.MAX_LABEL
-import com.clipcut.domain.publish.MAX_TOP5_NOTE
-import com.clipcut.domain.publish.MAX_WEEK_LABEL
 import com.clipcut.domain.publish.MeterKind
 import com.clipcut.domain.publish.PayloadException
 import com.clipcut.domain.publish.PublishStatus
@@ -54,7 +50,6 @@ import com.clipcut.ui.publish.PublishBanner
 import com.clipcut.ui.theme.ClipCutTheme
 import dagger.hilt.android.AndroidEntryPoint
 import dagger.hilt.android.lifecycle.HiltViewModel
-import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -62,114 +57,61 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
-import org.json.JSONArray
-import org.json.JSONObject
+import java.time.Instant
 import java.time.ZoneId
+import java.time.format.DateTimeFormatter
+import java.util.Locale
 import javax.inject.Inject
 
-/** The last Top 5 typed in, kept so it can be edited and published again. */
-class Top5Store @Inject constructor(@ApplicationContext context: Context) {
-    private val prefs = context.getSharedPreferences("top5", Context.MODE_PRIVATE)
+/** The week's label, from its first day: "Week of 16 Oct". */
+fun weekLabel(weekFromMs: Long, zone: ZoneId): String =
+    "Week of " + Instant.ofEpochMilli(weekFromMs).atZone(zone).format(DateTimeFormatter.ofPattern("d MMM", Locale.ENGLISH))
 
-    var week: String
-        get() = prefs.getString("week", "").orEmpty()
-        set(v) = prefs.edit().putString("week", v).apply()
-
-    var attachScores: Boolean
-        get() = prefs.getBoolean("attach_scores", true)
-        set(v) = prefs.edit().putBoolean("attach_scores", v).apply()
-
-    var rows: List<Top5Row>
-        get() = prefs.getString("rows", null)?.let { raw ->
-            runCatching { JSONArray(raw).let { a -> List(a.length()) { a.getJSONObject(it).let { o -> Top5Row(o.optString("name"), note = o.optString("note")) } } } }.getOrNull()
-        }.orEmpty().let { it + List((5 - it.size).coerceAtLeast(0)) { Top5Row("") } }.take(5)
-        set(v) = prefs.edit().putString("rows", JSONArray(v.map { JSONObject().put("name", it.name).put("note", it.note) }).toString()).apply()
-}
-
+/** The list as the data gives it: this week's five highest relevance scores, nobody added by hand and nothing typed. */
 data class Top5UiState(
-    val week: String = "",
-    val rows: List<Top5Row> = List(5) { Top5Row("") },
-    val error: String? = null,
-    /** This week's relevance per contestant (lowercase name), highest first. */
     val scores: List<Relevance> = emptyList(),
     val weekFromMs: Long = 0L,
-    val attachScores: Boolean = true,
+    val week: String = "",
+    val error: String? = null,
 ) {
-    fun scoreFor(name: String): Relevance? = scores.firstOrNull { it.week.name.equals(name.trim(), ignoreCase = true) }
+    val top: List<Relevance> get() = scores.filter { it.score > 0 }.take(5)
 }
 
 @HiltViewModel
 class Top5ViewModel @Inject constructor(
-    private val store: Top5Store,
     private val publisher: WebsitePublisher,
     private val history: RunHistory,
     private val contestants: ContestantStore,
 ) : ViewModel() {
-    private val _state = MutableStateFlow(Top5UiState(store.week, store.rows.map { it.copy(name = fullName(it.name)) }, attachScores = store.attachScores))
+    private val _state = MutableStateFlow(Top5UiState())
     val state: StateFlow<Top5UiState> = _state.asStateFlow()
 
     val publishStatus: StateFlow<PublishStatus> = publisher.status.map { it.getValue(MeterKind.TOP5) }
         .stateIn(viewModelScope, SharingStarted.Eagerly, PublishStatus.Idle)
 
     init {
-        refreshScores()
+        refresh()
     }
 
     /** Recomputes this week's relevance from everything collected since Friday 6 PM. Free: no calls. */
-    fun refreshScores() {
+    fun refresh() {
         val now = System.currentTimeMillis()
-        val from = weekStart(now, ZoneId.systemDefault())
+        val zone = ZoneId.systemDefault()
+        val from = weekStart(now, zone)
         val links = contestants.snapshot()
-        val scores = relevance(weekStats(history, { text -> links[com.clipcut.domain.history.contestantKey(text)] ?: contestants.resolve(text) }, from, now))
-        _state.update { it.copy(scores = scores, weekFromMs = from) }
+        val scores = relevance(weekStats(history, { text -> links[contestantKey(text)] ?: contestants.resolve(text) }, from, now))
+        _state.update { it.copy(scores = scores, weekFromMs = from, week = weekLabel(from, zone), error = null) }
     }
 
-    fun setWeek(v: String) {
-        val w = v.take(MAX_WEEK_LABEL)
-        store.week = w
-        _state.update { it.copy(week = w, error = null) }
-    }
-
-    fun setRow(i: Int, row: Top5Row) {
-        val rows = _state.value.rows.toMutableList().also { it[i] = row }
-        store.rows = rows
-        _state.update { it.copy(rows = rows, error = null) }
-    }
-
-    /** A name the roster knows becomes its full name ("Qazi" → "Qazi Touqeer"); anything else is left as typed. */
-    private fun fullName(name: String): String = name.trim().takeIf { it.isNotEmpty() }?.let { n -> contestants.resolve(n) ?: n } ?: name
-
-    fun setAttachScores(on: Boolean) {
-        store.attachScores = on
-        _state.update { it.copy(attachScores = on) }
-    }
-
-    /** Puts this week's five highest scores in the rows (notes typed for the same names are kept). */
-    fun fillFromData() {
-        refreshScores()
-        val s = _state.value
-        val notes = s.rows.associate { it.name.trim().lowercase() to it.note }
-        val rows = s.scores.take(5).map { Top5Row(it.week.name, note = notes[it.week.name.lowercase()].orEmpty()) }
-        val filled = rows + List(5 - rows.size) { Top5Row("") }
-        store.rows = filled
-        _state.update { it.copy(rows = filled, error = if (rows.isEmpty()) "No data this week yet: run Tagline Counter or Boss Meter and link taglines to contestants." else null) }
-    }
-
-    /** Checks the list against the website's rules first; nothing is sent if it would be refused. */
+    /** Publishes exactly the list on screen, with each score and the facts behind it. Nothing is sent if the data gives no list. */
     fun publish() {
-        refreshScores()
+        refresh()
         val s = _state.value
-        val rows = s.rows.map { r0 ->
-            val r = r0.copy(name = fullName(r0.name))
-            val sc = if (s.attachScores && r.name.isNotBlank()) s.scoreFor(r.name) else null
-            r.copy(number = sc?.score?.toString().orEmpty(), facts = sc?.let { "Relevance ${it.score}/100: ${it.factsLine}" }.orEmpty())
-        }
+        val rows = s.top.map { r -> Top5Row(r.week.name, number = r.score.toString(), facts = "Relevance ${r.score}/100: ${r.factsLine}") }
         try {
             publisher.publish(top5Payload(s.week, rows, System.currentTimeMillis()))
-            store.rows = rows.map { it.copy(number = "", facts = "") }
-            _state.update { it.copy(rows = store.rows) } // the screen shows the full names that were sent
         } catch (e: PayloadException) {
-            _state.update { it.copy(error = e.message) }
+            _state.update { it.copy(error = if (rows.isEmpty()) "No data this week yet: run Tagline Counter or Boss Meter, and link taglines and hashtags to contestants." else e.message) }
         }
     }
 
@@ -181,17 +123,13 @@ fun Top5Screen(onExit: () -> Unit, viewModel: Top5ViewModel = hiltViewModel()) {
     val state by viewModel.state.collectAsState()
     val publish by viewModel.publishStatus.collectAsState()
     val zone = ZoneId.systemDefault()
-    Screen(title = "Top 5 of the week", subtitle = "Published to the website's Updates. The newest list replaces the old one.") {
+    Screen(title = "Top 5 of the week", subtitle = "Built only from this week's data. Nothing here is typed in.") {
         Column(modifier = Modifier.weight(1f).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            OutlinedTextField(
-                state.week, viewModel::setWeek, label = { Text("Week (optional)") }, placeholder = { Text("e.g. Week 3") },
-                singleLine = true, modifier = Modifier.fillMaxWidth(),
-            )
-            SectionCard("Relevance score") {
+            SectionCard(state.week.ifEmpty { "This week" }) {
                 Text(
                     "From everything collected since ${dateTimeText(state.weekFromMs, zone)}: tagline tweets, original tweets, tagline wins, " +
-                        "peak hour, Boss Meter vote share and wins, trending positions. Each fact is compared with the week's best; " +
-                        "it resets every Friday 6 PM.",
+                        "peak hour, Boss Meter vote share and wins, trending positions. Each fact is compared with the week's best. " +
+                        "The week resets every Friday 6 PM.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -200,40 +138,31 @@ fun Top5Screen(onExit: () -> Unit, viewModel: Top5ViewModel = hiltViewModel()) {
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("Attach score and facts to each contestant", style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
-                    Switch(checked = state.attachScores, onCheckedChange = viewModel::setAttachScores)
-                }
-                OutlinedButton(onClick = viewModel::fillFromData, modifier = Modifier.fillMaxWidth()) { Text("Fill from this week's data") }
             }
-            state.rows.forEachIndexed { i, row ->
+            if (state.top.isEmpty()) {
+                Text(
+                    "No data this week yet. Run Tagline Counter or Boss Meter; each tagline and hashtag needs a contestant label.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            state.top.forEachIndexed { i, r ->
                 SectionCard("#${i + 1}") {
-                    OutlinedTextField(
-                        row.name, { viewModel.setRow(i, row.copy(name = it.take(MAX_LABEL))) },
-                        label = { Text(if (i == 0) "Contestant (required)" else "Contestant") }, singleLine = true, modifier = Modifier.fillMaxWidth(),
-                    )
-                    OutlinedTextField(
-                        row.note, { viewModel.setRow(i, row.copy(note = it.take(MAX_TOP5_NOTE))) },
-                        label = { Text("Note (optional)") }, singleLine = true, modifier = Modifier.fillMaxWidth(),
-                    )
-                    if (row.name.isNotBlank()) {
-                        val sc = state.scoreFor(row.name)
-                        Text(
-                            sc?.let { "Relevance ${it.score}/100 · ${it.factsLine}" } ?: "No data for this name this week (no score sent).",
-                            style = MaterialTheme.typography.labelMedium,
-                            color = if (sc != null) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(r.week.name, style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+                        Text("${r.score}/100", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary)
                     }
+                    Text(r.factsLine, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
-            Text(
-                "Empty rows are not sent. Order is the rank.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
             state.error?.let { StatusRow(it, Tone.Bad) }
             PublishBanner(publish, onRetry = viewModel::retry)
-            Button(onClick = viewModel::publish, enabled = publish != PublishStatus.Sending, modifier = Modifier.fillMaxWidth()) { Text("Publish to website") }
+            OutlinedButton(onClick = viewModel::refresh, modifier = Modifier.fillMaxWidth()) { Text("↻ Recalculate from this week's data") }
+            Button(
+                onClick = viewModel::publish,
+                enabled = publish != PublishStatus.Sending && state.top.isNotEmpty(),
+                modifier = Modifier.fillMaxWidth(),
+            ) { Text("Publish to website") }
         }
         TextButton(onClick = onExit) { Text("Back") }
     }

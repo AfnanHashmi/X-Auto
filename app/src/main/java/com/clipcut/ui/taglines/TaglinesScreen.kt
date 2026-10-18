@@ -45,6 +45,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import com.clipcut.domain.share.PositionInput
+import com.clipcut.domain.publish.PublishStatus
 import com.clipcut.ui.history.ContestantDialog
 import com.clipcut.ui.history.ContestantPill
 import com.clipcut.domain.share.ShareStage
@@ -107,7 +108,19 @@ fun TaglinesScreen(
                 }
             } else {
                 item { ReportHeader(report, zone) }
-                item { PublishBanner(publish, onRetry = viewModel::retryPublish) }
+                item {
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        PublishBanner(publish, onRetry = viewModel::retryPublish)
+                        OutlinedButton(onClick = viewModel::sendToWebsite, enabled = publish != PublishStatus.Sending, modifier = Modifier.fillMaxWidth()) {
+                            Text("↻ Send latest run to website")
+                        }
+                        Text(
+                            "Sends what is already here (counts, read-out, Deep looks). No X calls, no cost.",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
                 items(report.counts, key = { it.tagline }) { c ->
                     TaglineCard(
                         report, c, zone,

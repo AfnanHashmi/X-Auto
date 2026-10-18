@@ -19,6 +19,8 @@ import com.clipcut.domain.api.BOSS_METER_ORDER
 import com.clipcut.domain.api.XReadPool
 import com.clipcut.domain.api.paidByText
 import com.clipcut.domain.history.ContestantStore
+import com.clipcut.domain.publish.SyncResult
+import com.clipcut.domain.publish.WebsiteSync
 import com.clipcut.domain.history.RunHistory
 import com.clipcut.domain.publish.BossStage
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -66,7 +68,16 @@ class BossMeterViewModel @Inject constructor(
     private val pool: XReadPool,
     private val history: RunHistory,
     private val contestants: ContestantStore,
+    private val sync: WebsiteSync,
 ) : ViewModel() {
+    /** Sends the latest run (stage, final flag, insights) to the website again. No X calls, no cost. */
+    fun sendToWebsite() {
+        when (val r = sync.sendBoss()) {
+            SyncResult.Queued -> Unit // the banner shows Updating / Website updated / Not updated
+            is SyncResult.Nothing -> _state.update { it.copy(error = r.reason, message = null) }
+        }
+    }
+
 
     /** Every contestant name used so far, for the link dialog. */
     fun knownContestants(): List<String> = contestants.knownNames()

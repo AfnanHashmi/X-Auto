@@ -20,6 +20,7 @@ import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -63,6 +64,12 @@ import com.clipcut.domain.api.XReadPool
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
+import com.clipcut.domain.publish.MeterKind
+import com.clipcut.domain.publish.PublishStatus
+import com.clipcut.domain.publish.SyncResult
+import com.clipcut.domain.publish.WebsitePublisher
+import com.clipcut.domain.publish.WebsiteSync
+import kotlinx.coroutines.flow.stateIn
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
 
@@ -72,7 +79,28 @@ class HomeViewModel @Inject constructor(
     private val selector: MediaAccountSelector,
     unfollowDao: UnfollowDao,
     private val pool: XReadPool,
+    private val sync: WebsiteSync,
+    publisher: WebsitePublisher,
 ) : ViewModel() {
+    /** What the last website re-send did, for the line under the master button. */
+    private val _syncNote = kotlinx.coroutines.flow.MutableStateFlow<String?>(null)
+    val syncNote: StateFlow<String?> = _syncNote
+
+    /** The website state of the two feeds, for the tiles. */
+    val feeds: StateFlow<Map<MeterKind, PublishStatus>> = publisher.status
+        .stateIn(viewModelScope, kotlinx.coroutines.flow.SharingStarted.Eagerly, emptyMap())
+
+    fun sendTagline() = note(listOf(MeterKind.TREND to sync.sendTagline()))
+
+    fun sendBoss() = note(listOf(MeterKind.BOSS to sync.sendBoss()))
+
+    fun sendAll() = note(sync.sendAll().toList())
+
+    private fun note(results: List<Pair<MeterKind, SyncResult>>) {
+        val problems = results.mapNotNull { (k, r) -> (r as? SyncResult.Nothing)?.let { "${k.label}: ${it.reason}" } }
+        _syncNote.value = if (problems.isEmpty()) "Sending to the website…" else problems.joinToString("  ")
+    }
+
     /** Each X app's prepaid balance, from X's own usage endpoint (free to read). */
     val balances: StateFlow<Balances> = pool.balances
 
@@ -103,6 +131,8 @@ fun HomeScreen(modifier: Modifier = Modifier, viewModel: HomeViewModel = hiltVie
     var active by remember { mutableStateOf(viewModel.active) }
     val summary by viewModel.unfollowSummary.collectAsState(initial = UnfollowSummary.EMPTY)
     val balances by viewModel.balances.collectAsState()
+    val feeds by viewModel.feeds.collectAsState()
+    val syncNote by viewModel.syncNote.collectAsState()
     val lifecycleOwner = LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
@@ -143,9 +173,21 @@ fun HomeScreen(modifier: Modifier = Modifier, viewModel: HomeViewModel = hiltVie
                 },
             )
             TileRow(
-                { NavTile("Boss Meter", "Hashtag votes in a thread", onClick = { BossMeterActivity.start(context) }, modifier = it) },
-                { NavTile("Taglines", "Tweets per tagline, 24 h", onClick = { TaglinesActivity.start(context) }, modifier = it) },
+                {
+                    NavTile(
+                        "Boss Meter", "Hashtag votes · site: ${feedText(feeds[MeterKind.BOSS])}", onClick = { BossMeterActivity.start(context) }, modifier = it,
+                        actionLabel = "↻ Send to site", onAction = viewModel::sendBoss,
+                    )
+                },
+                {
+                    NavTile(
+                        "Taglines", "Tweets per tagline · site: ${feedText(feeds[MeterKind.TREND])}", onClick = { TaglinesActivity.start(context) }, modifier = it,
+                        actionLabel = "↻ Send to site", onAction = viewModel::sendTagline,
+                    )
+                },
             )
+            OutlinedButton(onClick = viewModel::sendAll, modifier = Modifier.fillMaxWidth()) { Text("↻ Refresh website: Taglines and Boss Meter") }
+            syncNote?.let { Text(it, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant) }
             NavTile("Top 5 of the week", "Weekly ranking for the website", onClick = { Top5Activity.start(context) }, modifier = Modifier.fillMaxWidth(), accent = MaterialTheme.colorScheme.tertiary)
             NavTile(
                 "Trigger Deletion",
@@ -256,4 +298,12 @@ private fun AccountSwitcher(active: MediaAccount, onSelect: (MediaAccount) -> Un
             }
         }
     }
+}
+
+/** One short word for a feed's website state. */
+private fun feedText(s: PublishStatus?): String = when (s) {
+    null, PublishStatus.Idle -> "not sent"
+    PublishStatus.Sending -> "sending…"
+    is PublishStatus.Done -> "updated ✓"
+    is PublishStatus.Failed -> "not updated"
 }

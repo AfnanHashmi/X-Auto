@@ -113,6 +113,9 @@ fun NavTile(
     modifier: Modifier = Modifier,
     accent: Color = MaterialTheme.colorScheme.primary,
     tint: Color? = null,
+    /** A small action under the status line (for example "↻ Send to site"); null for none. */
+    actionLabel: String? = null,
+    onAction: () -> Unit = {},
 ) {
     Panel(modifier = modifier.heightIn(min = 92.dp), color = tint ?: MaterialTheme.colorScheme.surface, onClick = onClick) {
         Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -130,6 +133,11 @@ fun NavTile(
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.padding(start = 8.dp),
                 )
+            }
+            if (actionLabel != null) {
+                TextButton(onClick = onAction, contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 0.dp, vertical = 0.dp)) {
+                    Text(actionLabel, style = MaterialTheme.typography.labelLarge)
+                }
             }
         }
     }
