@@ -105,7 +105,7 @@ class Top5ViewModel @Inject constructor(
     private val history: RunHistory,
     private val contestants: ContestantStore,
 ) : ViewModel() {
-    private val _state = MutableStateFlow(Top5UiState(store.week, store.rows, attachScores = store.attachScores))
+    private val _state = MutableStateFlow(Top5UiState(store.week, store.rows.map { it.copy(name = fullName(it.name)) }, attachScores = store.attachScores))
     val state: StateFlow<Top5UiState> = _state.asStateFlow()
 
     val publishStatus: StateFlow<PublishStatus> = publisher.status.map { it.getValue(MeterKind.TOP5) }
@@ -136,6 +136,9 @@ class Top5ViewModel @Inject constructor(
         _state.update { it.copy(rows = rows, error = null) }
     }
 
+    /** A name the roster knows becomes its full name ("Qazi" → "Qazi Touqeer"); anything else is left as typed. */
+    private fun fullName(name: String): String = name.trim().takeIf { it.isNotEmpty() }?.let { n -> contestants.resolve(n) ?: n } ?: name
+
     fun setAttachScores(on: Boolean) {
         store.attachScores = on
         _state.update { it.copy(attachScores = on) }
@@ -156,12 +159,15 @@ class Top5ViewModel @Inject constructor(
     fun publish() {
         refreshScores()
         val s = _state.value
-        val rows = s.rows.map { r ->
+        val rows = s.rows.map { r0 ->
+            val r = r0.copy(name = fullName(r0.name))
             val sc = if (s.attachScores && r.name.isNotBlank()) s.scoreFor(r.name) else null
             r.copy(number = sc?.score?.toString().orEmpty(), facts = sc?.let { "Relevance ${it.score}/100: ${it.factsLine}" }.orEmpty())
         }
         try {
             publisher.publish(top5Payload(s.week, rows, System.currentTimeMillis()))
+            store.rows = rows.map { it.copy(number = "", facts = "") }
+            _state.update { it.copy(rows = store.rows) } // the screen shows the full names that were sent
         } catch (e: PayloadException) {
             _state.update { it.copy(error = e.message) }
         }
