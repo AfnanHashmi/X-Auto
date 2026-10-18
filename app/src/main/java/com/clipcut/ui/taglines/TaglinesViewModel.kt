@@ -192,12 +192,7 @@ class TaglinesViewModel @Inject constructor(
                     history.saveTagline(out.report) // every count is kept for the timeline and the weekly ranking
                     _state.update { it.copy(running = false, report = out.report, analysis = null, deepLooks = emptyMap(), message = "Counted from X. About $${"%.3f".format(estimatedCostUsd(out.report.counts.size))} billed by X. Paid by ${paidByText(callsBefore, pool.calls.value)}.") }
                     refreshContestants()
-                    // after the result is on screen
-                    try {
-                        publisher.publish(trendPayload(out.report, ZoneId.systemDefault()))
-                    } catch (e: PayloadException) {
-                        publisher.reject(MeterKind.TREND, e.message ?: "The website cannot take this result.")
-                    }
+                    publishTrend() // after the result is on screen
                 }
                 is CountOutcome.Failed -> _state.update { it.copy(running = false, error = out.reason) }
             }
@@ -240,8 +235,12 @@ class TaglinesViewModel @Inject constructor(
                     previous = deepLookStore.previousReadout(report.fetchedAtMs),
                 )
                 deepLookStore.addReadout(ReadoutRecord(report.fetchedAtMs, report.counts.associate { it.tagline to it.all.total }, a))
-                if (_state.value.report?.fetchedAtMs == report.fetchedAtMs) _state.update { it.copy(analysing = false, analysis = a) }
-                else _state.update { it.copy(analysing = false) }
+                if (_state.value.report?.fetchedAtMs == report.fetchedAtMs) {
+                    _state.update { it.copy(analysing = false, analysis = a) }
+                    publishTrend() // the same run again, now with the read-out
+                } else {
+                    _state.update { it.copy(analysing = false) } // kept on the phone with its own (older) count
+                }
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -275,15 +274,32 @@ class TaglinesViewModel @Inject constructor(
                 deepLookStore.addLook(look) // always kept, even if a new count arrived meanwhile
                 if (_state.value.report?.fetchedAtMs == report.fetchedAtMs) {
                     _state.update { it.copy(deepLooking = null, deepLooks = it.deepLooks + (tagline to look)) }
+                    refreshHistory()
+                    publishTrend() // the same run again, now with this Deep look
                 } else {
                     _state.update { it.copy(deepLooking = null) }
+                    refreshHistory()
                 }
-                refreshHistory()
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
                 _state.update { it.copy(deepLooking = null, error = "Deep look failed: ${e.message}") }
             }
+        }
+    }
+
+    /**
+     * Sends the current run with every AI result it has right now (none, a read-out, Deep looks on some taglines, or all).
+     * Called after the count and again after each read-out or Deep look for the same count; the website updates that run.
+     * A send still on its way is replaced by the newer, fuller one, and Retry always resends the fullest.
+     */
+    private fun publishTrend() {
+        val s = _state.value
+        val report = s.report ?: return
+        try {
+            publisher.publish(trendPayload(report, ZoneId.systemDefault(), s.analysis, s.deepLooks, s.regulars))
+        } catch (e: PayloadException) {
+            publisher.reject(MeterKind.TREND, e.message ?: "The website cannot take this result.")
         }
     }
 

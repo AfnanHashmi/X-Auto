@@ -6,6 +6,8 @@ import com.clipcut.domain.taglines.GridException
 import com.clipcut.domain.taglines.HOUR_MS
 import com.clipcut.domain.taglines.hourlyGrid
 import com.clipcut.domain.taglines.insightLines
+import com.clipcut.domain.taglines.DeepLook
+import com.clipcut.domain.taglines.TaglineAnalysis
 import com.clipcut.domain.share.taglineStat
 import java.time.ZoneId
 import org.json.JSONArray
@@ -164,7 +166,18 @@ fun bossItemInsights(r: BossMeterResult, index: Int): List<String> {
  * covers the counted window: [hourlyStart] is where the first hour begins, and the hours are oldest first. An hour X sent no
  * row for is 0; a bucket that starts part-way into an hour is counted in that hour. A bucket that falls outside the grid is an error, never dropped.
  */
-fun trendPayload(report: CountReport, zone: ZoneId? = null): PublishPayload {
+/**
+ * The Tagline Counter run. [readout] and [looks] are whatever AI results exist for this run at the moment of sending; the
+ * same run (same refreshedAt) is sent again each time one is added, and the website updates that run in place. Anything
+ * not there yet is simply left out: never null, never an empty object or array.
+ */
+fun trendPayload(
+    report: CountReport,
+    zone: ZoneId? = null,
+    readout: TaglineAnalysis? = null,
+    looks: Map<String, DeepLook> = emptyMap(),
+    steadyVoices: Map<String, List<Pair<String, Int>>> = emptyMap(),
+): PublishPayload {
     val grid = try {
         hourlyGrid(report)
     } catch (e: GridException) {
@@ -181,7 +194,12 @@ fun trendPayload(report: CountReport, zone: ZoneId? = null): PublishPayload {
     validateItems(items)
     val body = JSONObject().put("kind", "trend").put("refreshedAt", isoUtc(report.fetchedAtMs)).put("hourlyStart", isoUtc(grid.startMs))
     zone?.let { z -> cleanInsights(insightLines(report, z))?.let { body.put("insights", JSONArray(it)) } }
-    body.put("items", itemsJson(items))
+    readout?.let(::readoutJson)?.let { body.put("readout", it) }
+    val itemsArray = itemsJson(items)
+    report.counts.forEachIndexed { i, t ->
+        looks[t.tagline]?.let { deepLookJson(it, steadyVoices[t.tagline].orEmpty()) }?.let { itemsArray.getJSONObject(i).put("deepLook", it) }
+    }
+    body.put("items", itemsArray)
     return PublishPayload(MeterKind.TREND, body.toString())
 }
 
@@ -221,4 +239,59 @@ fun top5Payload(week: String, rows: List<Top5Row>, nowMs: Long): PublishPayload 
     if (w.isNotEmpty()) body.put("week", w)
     body.put("items", itemsJson(items))
     return PublishPayload(MeterKind.TOP5, body.toString())
+}
+
+// ---- AI results on a Tagline Counter run -----------------------------------------------------------------------------
+
+const val MAX_THEMES = 5
+const val MAX_VOICES = 5
+const val MAX_LOOK_POSTS = 3
+const val MAX_MODEL = 60
+
+private val HANDLE = Regex("""^@[A-Za-z0-9_]{1,15}$""")
+private val X_POST = Regex("""^https://x\.com/[A-Za-z0-9_]{1,15}/status/\d{5,25}$""")
+
+/** "xAI · grok-4.3 (OpenAI failed)" → ("xai", "grok-4.3"). */
+private fun providerAndModel(label: String): Pair<String, String>? {
+    val parts = label.substringBefore(" (").split(" · ")
+    if (parts.size < 2) return null
+    return parts[0].trim().lowercase() to parts[1].trim().take(MAX_MODEL)
+}
+
+private fun line(text: String): String? = cleanInsights(listOf(text))?.first()
+
+/**
+ * The AI read-out, as the website takes it: a headline, up to 5 findings, the momentum line, which model wrote it and
+ * when. The "post angle" is advice for the user, not for the site, so it is not sent. Null when nothing usable is left.
+ */
+fun readoutJson(a: TaglineAnalysis): JSONObject? {
+    val headline = line(a.headline) ?: return null
+    val o = JSONObject().put("headline", headline)
+    cleanInsights(a.insights)?.let { o.put("insights", JSONArray(it)) }
+    line(a.momentum)?.let { o.put("momentum", it) }
+    providerAndModel(a.label)?.let { (p, m) -> o.put("provider", p).put("model", m) }
+    if (a.atMs > 0) o.put("writtenAt", isoUtc(a.atMs))
+    return o
+}
+
+/**
+ * One tagline's Deep look: themes, the top voices with what Grok saw, posts to open, what changed since earlier looks,
+ * the accounts that keep coming up across looks, how many posts were read, by which model and when. Handles and links
+ * that do not look real are dropped. Null when it has no themes left.
+ */
+fun deepLookJson(d: DeepLook, steady: List<Pair<String, Int>> = emptyList()): JSONObject? {
+    val themes = cleanInsights(d.themes)?.take(MAX_THEMES) ?: return null
+    val o = JSONObject().put("themes", JSONArray(themes))
+    d.voices.filter { HANDLE.matches(it.handle) }.take(MAX_VOICES).takeIf { it.isNotEmpty() }?.let { vs ->
+        o.put("voices", JSONArray(vs.map { v -> JSONObject().put("handle", v.handle).apply { line(v.why)?.let { put("note", it) } } }))
+    }
+    d.examplePosts.filter { X_POST.matches(it) }.take(MAX_LOOK_POSTS).takeIf { it.isNotEmpty() }?.let { o.put("posts", JSONArray(it)) }
+    line(d.changes)?.let { o.put("changes", it) }
+    steady.filter { HANDLE.matches(it.first) && it.second >= 2 }.take(MAX_VOICES).takeIf { it.isNotEmpty() }?.let { st ->
+        o.put("steadyVoices", JSONArray(st.map { (h, n) -> JSONObject().put("handle", h).put("looks", n) }))
+    }
+    if (d.postsRead > 0) o.put("postsRead", d.postsRead)
+    providerAndModel(d.label)?.let { (p, m) -> o.put("provider", p).put("model", m) }
+    if (d.atMs > 0) o.put("lookedAt", isoUtc(d.atMs))
+    return o
 }
