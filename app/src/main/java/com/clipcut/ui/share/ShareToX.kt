@@ -30,7 +30,7 @@ object ShareToX {
     /** [error] is set when X could not be opened; [savedToGallery] says whether the image is also in Pictures/X Auto. */
     data class Outcome(val error: String?, val savedToGallery: Boolean) {
         /** One line for the screen. */
-        val message: String get() = error ?: if (savedToGallery) "Image saved to Pictures/X Auto. Check the post in X, then tap Post." else "Opened X. (The image could not be saved to the gallery.)"
+        val message: String get() = error ?: if (savedToGallery) "Caption copied and image saved to Pictures/X Auto. For a thread: post your first tweet, tap + under it, paste, attach the image." else "Opened X. (The image could not be saved to the gallery.)"
     }
 
     fun share(context: Context, content: ShareContent, name: String = "boss-meter"): Outcome = share(context, render(content), content.caption, name)
@@ -41,6 +41,10 @@ object ShareToX {
     private fun share(context: Context, image: Bitmap, caption: String, name: String): Outcome {
         val file = File(File(context.cacheDir, "shared").apply { mkdirs() }, "result.png")
         file.outputStream().use { image.compress(Bitmap.CompressFormat.PNG, 100, it) }
+        runCatching {
+            val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+            clipboard.setPrimaryClip(android.content.ClipData.newPlainText("caption", caption))
+        }
         val saved = runCatching { GalleryStore.saveImage(context, file, "x-auto-$name-${System.currentTimeMillis()}.png") }.getOrDefault(false)
         return Outcome(open(context, file, caption), saved)
     }

@@ -46,7 +46,7 @@ fun bossMeterShare(r: BossMeterResult, dateText: String): ShareContent {
     val rows = ranked.map { ShareRow(it.tag, "${n(it.count)}  (${"%.1f".format(r.percent(it))}%)", it.count.toFloat() / top) }
     val lines = ranked.mapIndexed { i, t -> "${MEDALS.getOrElse(i) { "${i + 1}." }} ${t.tag}: ${n(t.count)} (${"%.1f".format(r.percent(t))}%)" }
     val caption = fitCaption(
-        "🔥 BOSS METER: hashtag votes",
+        "🔥 Boss Meter : Update",
         lines + "Total votes counted: ${n(r.trackedSum)}",
         "Counted with the X API, $dateText",
     )
