@@ -27,4 +27,15 @@ class RealBossMeterApi @Inject constructor(private val pool: XReadPool) : BossMe
         }
         parseTotal(body)
     }
+
+    override suspend fun post(id: String): String = withContext(Dispatchers.IO) {
+        val url = "https://api.x.com/2/tweets/$id".toHttpUrl().newBuilder()
+            .addQueryParameter("tweet.fields", "entities,note_tweet")
+            .build()
+        try {
+            pool.read(BOSS_METER_ORDER, url.toString(), POST_READ_USD).second
+        } catch (e: XReadException) {
+            throw BossMeterException(e.message ?: "error", e.httpCode, e.retryAtEpochSec)
+        }
+    }
 }

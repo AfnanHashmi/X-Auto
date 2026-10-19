@@ -25,6 +25,9 @@ interface BossMeterApi {
 
     /** X's `total_tweet_count` for [query] (0 when X leaves it out). One call, billed by X per call. */
     suspend fun count(query: String): Long
+
+    /** The raw JSON of one post with its entities (`GET /2/tweets/:id`), to read its hashtags. One call, billed by X. */
+    suspend fun post(id: String): String
 }
 
 data class TagCount(val tag: String, val count: Long)
@@ -48,6 +51,12 @@ sealed interface BossMeterOutcome {
 }
 
 const val BOSS_CALL_USD = 0.005
+
+/** Reading one post to take its hashtags costs one call too. */
+const val POST_READ_USD = 0.005
+
+/** A real post id has 18 or 19 digits; shorter ones are a link still being typed. */
+const val MIN_POST_ID_LENGTH = 15
 const val MAX_HASHTAGS = 20
 
 /** One call for the thread plus one per hashtag. */
@@ -73,6 +82,27 @@ fun hashtagsFrom(text: String): List<String> =
         .filter { it.isNotEmpty() && it.all { c -> c.isLetterOrDigit() || c == '_' } }
         .map { "#$it" }
         .distinctBy { it.lowercase() }
+
+/** The show's own tags: they are on every post and are not votes. Compared in lower case. */
+private val SHOW_TAGS = setOf("biggboss", "biggboss20", "bb20", "bigboss20", "biggbosstak", "biggbosslivefeed", "jiohotstar", "colorstv", "colors")
+
+/** The hashtags of a post, in the order written and without repeats. A long post keeps its full text in `note_tweet`. */
+fun hashtagsFromPost(body: String): List<String> {
+    val data = try {
+        JSONObject(body).optJSONObject("data")
+    } catch (e: JSONException) {
+        throw BossMeterException("X sent a reply that is not valid JSON")
+    } ?: return emptyList()
+    fun tags(entities: JSONObject?): List<String> {
+        val a = entities?.optJSONArray("hashtags") ?: return emptyList()
+        return List(a.length()) { a.optJSONObject(it)?.optString("tag").orEmpty() }
+    }
+    val found = tags(data.optJSONObject("note_tweet")?.optJSONObject("entities")).ifEmpty { tags(data.optJSONObject("entities")) }
+    return hashtagsFrom(found.joinToString(" "))
+}
+
+/** Drops the show's own tags (for example #BiggBoss20); what is left is what people vote with. */
+fun voteTags(tags: List<String>): List<String> = tags.filter { it.trimStart('#').lowercase() !in SHOW_TAGS }
 
 private val LOOKALIKE = Regex("(?<=[a-z])ls(?=[A-Z])")
 
@@ -141,6 +171,26 @@ class BossMeterService(
                 else -> "X returned HTTP ${e.httpCode}: ${e.message}"
             }
             BossMeterOutcome.Failed("$why $calls call(s) had already gone through and may have been billed.", calls)
+        }
+    }
+
+    /** The vote hashtags written in the post at [link]: one read of the post, never a count. */
+    suspend fun readHashtags(link: String): Result<List<String>> {
+        if (!api.isConfigured) return Result.failure(BossMeterException("No X app keys are in local.properties (Main, RW or DK)."))
+        val id = postIdFrom(link) ?: return Result.failure(BossMeterException("That is not a post link."))
+        return try {
+            Result.success(voteTags(hashtagsFromPost(api.post(id))))
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: BossMeterException) {
+            Result.failure(BossMeterException(
+                when (e.httpCode) {
+                    402 -> "X says every account is out of credits (HTTP 402). Top up Main, RW or DK."
+                    null -> "X did not reply: ${e.message}"
+                    else -> "X returned HTTP ${e.httpCode}: ${e.message}"
+                },
+                e.httpCode,
+            ))
         }
     }
 

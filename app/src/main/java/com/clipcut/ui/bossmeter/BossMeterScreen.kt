@@ -86,6 +86,12 @@ fun BossMeterScreen(
                         OutlinedButton(onClick = viewModel::fixLookalikes, modifier = Modifier.fillMaxWidth()) { Text("Fix the spelling") }
                     }
                     RoundStage(state, viewModel)
+                    if (state.reading) {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                            CircularProgressIndicator(modifier = Modifier.size(22.dp), strokeWidth = 2.dp)
+                            Text("Reading the hashtags from the post…", style = MaterialTheme.typography.bodyMedium)
+                        }
+                    }
                     if (state.running) {
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                             CircularProgressIndicator(modifier = Modifier.size(22.dp), strokeWidth = 2.dp)

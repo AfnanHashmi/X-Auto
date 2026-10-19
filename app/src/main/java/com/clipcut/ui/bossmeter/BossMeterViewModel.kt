@@ -7,6 +7,8 @@ import com.clipcut.domain.bossmeter.BossMeterResult
 import com.clipcut.domain.bossmeter.BossMeterService
 import com.clipcut.domain.bossmeter.BossMeterStore
 import com.clipcut.domain.bossmeter.bossMeterCostUsd
+import com.clipcut.domain.bossmeter.MIN_POST_ID_LENGTH
+import com.clipcut.domain.bossmeter.POST_READ_USD
 import com.clipcut.domain.bossmeter.hashtagsFrom
 import com.clipcut.domain.bossmeter.lookalikeFixes
 import com.clipcut.domain.bossmeter.postIdFrom
@@ -27,6 +29,8 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -50,6 +54,8 @@ data class BossMeterUiState(
     val stage: BossStage = BossStage.CONTESTANTS,
     /** Marks the finalists' run as the final result. Only with [BossStage.FINALISTS]; switches itself off once published. */
     val final: Boolean = false,
+    /** The post is being read for its hashtags (one X call). */
+    val reading: Boolean = false,
 ) {
     val hashtags: List<String> get() = hashtagsFrom(hashtagText)
     val postId: String? get() = postIdFrom(link)
@@ -57,7 +63,7 @@ data class BossMeterUiState(
     val costUsd: Double get() = bossMeterCostUsd(hashtags.size)
     /** Hashtags that probably have a lowercase L where a capital I belongs, with the suggested spelling. */
     val lookalikes: Map<String, String> get() = lookalikeFixes(hashtags)
-    val canCount: Boolean get() = !running && postId != null && hashtags.isNotEmpty()
+    val canCount: Boolean get() = !running && !reading && postId != null && hashtags.isNotEmpty()
 }
 
 @HiltViewModel
@@ -142,9 +148,41 @@ class BossMeterViewModel @Inject constructor(
 
     fun setFinal(on: Boolean) = _state.update { it.copy(final = on && it.stage == BossStage.FINALISTS) }
 
+    private var readJob: Job? = null
+
     fun setLink(v: String) {
         store.link = v
         _state.update { it.copy(link = v, error = null) }
+        readHashtagsFromPost(v)
+    }
+
+    /**
+     * A pasted post link fills the hashtag box from the post itself (one X read, about $0.005, show tags left out). It waits
+     * a moment so a link still being typed is not read, and a post is read once: the same link again costs nothing.
+     */
+    private fun readHashtagsFromPost(link: String) {
+        readJob?.cancel()
+        val id = postIdFrom(link)?.takeIf { it.length >= MIN_POST_ID_LENGTH }
+        if (id == null || id == store.readPostId) {
+            _state.update { it.copy(reading = false) }
+            return
+        }
+        _state.update { it.copy(reading = true) }
+        readJob = viewModelScope.launch {
+            delay(800)
+            service.readHashtags(link).fold(
+                onSuccess = { tags ->
+                    store.readPostId = id
+                    if (tags.isEmpty()) {
+                        _state.update { it.copy(reading = false, message = "The post has no vote hashtags. Type them in.") }
+                    } else {
+                        setHashtags(tags.joinToString(" "))
+                        _state.update { it.copy(reading = false, message = "Read ${tags.size} hashtag(s) from the post (about $${"%.3f".format(POST_READ_USD)}). Edit them if needed.") }
+                    }
+                },
+                onFailure = { e -> _state.update { it.copy(reading = false, error = "Could not read the post: ${e.message}") } },
+            )
+        }
     }
 
     /** When the number of hashtags crosses 2 (finalists) or back, the Round stage follows; a choice made by hand stays otherwise. */

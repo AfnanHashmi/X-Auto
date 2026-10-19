@@ -21,6 +21,11 @@ class BossMeterStore @Inject constructor(@ApplicationContext context: Context) {
         get() = prefs.getString("stage", "").orEmpty()
         set(v) = prefs.edit().putString("stage", v).apply()
 
+    /** The post whose hashtags were already read from X, so pasting the same link again costs nothing. */
+    var readPostId: String
+        get() = prefs.getString("readPostId", "").orEmpty()
+        set(v) = prefs.edit().putString("readPostId", v).apply()
+
     var hashtags: String
         get() = prefs.getString("hashtags", "").orEmpty()
         set(v) = prefs.edit().putString("hashtags", v).apply()

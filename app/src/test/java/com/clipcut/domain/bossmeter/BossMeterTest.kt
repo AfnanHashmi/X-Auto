@@ -17,6 +17,9 @@ private class FakeApi(private val answers: Map<String, Long>) : BossMeterApi {
     var rateLimitOnce: String? = null
     var failOn: String? = null
     override val isConfigured get() = configured
+    var postJson = ""
+    var postCalls = 0
+    override suspend fun post(id: String): String { postCalls++; return postJson }
     override suspend fun count(query: String): Long {
         if (query == rateLimitOnce) { rateLimitOnce = null; throw BossMeterException("slow down", 429, retryAtEpochSec = 1_000L + 20) }
         if (query == failOn) throw BossMeterException("Forbidden", 403)
@@ -120,5 +123,40 @@ class BossMeterTest {
         val few = bossMeterShare(BossMeterResult(ID, 10, listOf(TagCount("#A", 6), TagCount("#B", 3)), 0), "today")
         assertTrue(few.caption.contains("#A: 6 (66.7%)"))
         assertEquals("a\n\nb\n\nc", fitCaption("a", listOf("b"), "c"))
+    }
+
+    @Test
+    fun theHashtagsOfAPostAreReadInOrderWithoutRepeats() {
+        val json = """{"data":{"id":"1","text":"x","entities":{"hashtags":[{"tag":"BiggBoss20"},{"tag":"KanikaMann"},{"tag":"kanikamann"},{"tag":"AmrapaliDubey"}]}}}"""
+        assertEquals(listOf("#BiggBoss20", "#KanikaMann", "#AmrapaliDubey"), hashtagsFromPost(json))
+    }
+
+    @Test
+    fun aLongPostUsesTheFullHashtagsOfItsNoteTweet() {
+        val json = """{"data":{"id":"1","text":"cut","entities":{"hashtags":[{"tag":"Short"}]},"note_tweet":{"text":"long","entities":{"hashtags":[{"tag":"A"},{"tag":"B"},{"tag":"C"}]}}}}"""
+        assertEquals(listOf("#A", "#B", "#C"), hashtagsFromPost(json))
+    }
+
+    @Test
+    fun aPostWithoutHashtagsOrData_givesNothing() {
+        assertEquals(emptyList<String>(), hashtagsFromPost("""{"data":{"id":"1","text":"x"}}"""))
+        assertEquals(emptyList<String>(), hashtagsFromPost("""{"errors":[{"title":"Not Found"}]}"""))
+        assertThrows(BossMeterException::class.java) { hashtagsFromPost("<html>") }
+    }
+
+    @Test
+    fun showTagsAreDroppedInAnyCase() {
+        assertEquals(listOf("#KanikaMann", "#AmrapaliDubey"), voteTags(listOf("#BiggBoss20", "#bb20", "#KanikaMann", "#BiggBoss", "#AmrapaliDubey")))
+    }
+
+    @Test
+    fun readingAPostReturnsItsVoteTagsAndFailuresAreMessages() = runTest {
+        val api = FakeApi(emptyMap()).apply { postJson = """{"data":{"entities":{"hashtags":[{"tag":"BiggBoss20"},{"tag":"KanikaMann"}]}}}""" }
+        val service = BossMeterService(api, nowMs = { 1_000_000L }, pause = {})
+        assertEquals(listOf("#KanikaMann"), service.readHashtags(LINK).getOrThrow())
+        assertEquals(1, api.postCalls)
+        assertTrue(service.readHashtags("nonsense").isFailure)
+        api.configured = false
+        assertTrue(service.readHashtags(LINK).exceptionOrNull()!!.message!!.contains("local.properties"))
     }
 }
