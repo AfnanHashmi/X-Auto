@@ -48,6 +48,7 @@ import com.clipcut.ui.components.StatusRow
 import com.clipcut.ui.components.Tone
 import com.clipcut.domain.api.CaptionFormat
 import com.clipcut.domain.api.CaptionMood
+import com.clipcut.domain.history.ROSTER
 import com.clipcut.domain.api.MediaRef
 
 @Composable
@@ -146,6 +147,13 @@ fun CaptionScreen(
         )
 
         MoodPicker(selected = state.mood, onSelect = viewModel::selectMood, enabled = !state.isEnhancing)
+        state.readMood?.let { read ->
+            Text(
+                "Read as: $read",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
         HashtagPicker(caption = state.caption, onAdd = viewModel::addHashtag, enabled = !state.isEnhancing)
 
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -279,19 +287,18 @@ private fun HashtagPicker(caption: String, onAdd: (String) -> Unit, enabled: Boo
     }
 }
 
-private val HASHTAGS = listOf(
-    "#BiggBoss20", "#QaziTouqeer", "#ArishfaKhan", "#UditiSingh", "#YungDSA", "#KanikaMann", "#Gullu",
-)
+/** #BiggBoss20, the five contestants in the news first, then every other contestant from the roster. */
+private val HASHTAGS: List<String> = run {
+    val top = listOf("Qazi Touqeer", "Uditi Singh", "Kanika Mann", "Kushal Tanwar (Gullu)", "Arishfa Khan")
+    val first = top.mapNotNull { n -> ROSTER.firstOrNull { it.name == n }?.hashtag }
+    listOf("#BiggBoss20") + first + ROSTER.map { it.hashtag }.filter { it !in first }
+}
 
-private val MOOD_GROUPS = listOf(
-    "🔥  Energy" to listOf(CaptionMood.FIGHT, CaptionMood.BASHING, CaptionMood.SAVAGE, CaptionMood.VICTORY, CaptionMood.SHOCK),
-    "🎭  Expression" to listOf(CaptionMood.DIALOGUE, CaptionMood.FUN, CaptionMood.EMOTIONAL, CaptionMood.APPRECIATION),
-)
+private val MOODS = listOf(CaptionMood.FUN, CaptionMood.BASHING, CaptionMood.FIGHT, CaptionMood.EMOTIONAL, CaptionMood.APPRECIATION)
 
 /**
  * Mood picker. A full-width button shows the current mood with a down arrow at its right edge;
- * tapping it opens a bottom sheet: Auto on top as a wide card, then the 9 moods as chips grouped
- * into Energy / Expression.
+ * tapping it opens a bottom sheet: Auto on top as a wide card, then the five moods as chips.
  */
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
@@ -324,27 +331,24 @@ private fun MoodPicker(selected: CaptionMood, onSelect: (CaptionMood) -> Unit, e
 
                 if (selected == CaptionMood.AUTO) {
                     Button(onClick = { pick(CaptionMood.AUTO) }, modifier = Modifier.fillMaxWidth()) {
-                        Text("✨  Auto  \u2013  reads the moment, any voice")
+                        Text("✨  Auto  \u2013  reads your text and picks the mood")
                     }
                 } else {
                     OutlinedButton(onClick = { pick(CaptionMood.AUTO) }, modifier = Modifier.fillMaxWidth()) {
-                        Text("✨  Auto  \u2013  reads the moment, any voice")
+                        Text("✨  Auto  \u2013  reads your text and picks the mood")
                     }
                 }
 
-                MOOD_GROUPS.forEach { (title, moods) ->
-                    Text(title, style = MaterialTheme.typography.labelLarge)
-                    FlowRow(
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalArrangement = Arrangement.spacedBy(4.dp),
-                    ) {
-                        moods.forEach { mood ->
-                            FilterChip(
-                                selected = mood == selected,
-                                onClick = { pick(mood) },
-                                label = { Text("${mood.emoji}  ${mood.label}") },
-                            )
-                        }
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    MOODS.forEach { mood ->
+                        FilterChip(
+                            selected = mood == selected,
+                            onClick = { pick(mood) },
+                            label = { Text("${mood.emoji}  ${mood.label}") },
+                        )
                     }
                 }
             }

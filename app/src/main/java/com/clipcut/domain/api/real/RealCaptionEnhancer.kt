@@ -18,8 +18,21 @@ class RealCaptionEnhancer @Inject constructor(
     override var lastUsedLabel: String? = null
         private set
 
+    @Volatile
+    override var lastReadMood: String? = null
+        private set
+
+    /** Takes the "MOOD:" line off a reply. Only Auto's reading is kept; a mood picked by hand needs no reading. */
+    private fun withoutMoodLine(reply: String, mood: CaptionMood): String {
+        val (read, rest) = parseLeadingMood(reply)
+        lastReadMood = if (mood == CaptionMood.AUTO) read?.let(::moodDisplay) else null
+        return rest
+    }
+
     override suspend fun enhance(text: String, mood: CaptionMood): Result<String> = runCatching {
-        llm.respond(LlmTask.CAPTION, system = buildPrompt(mood), user = text).also { lastUsedLabel = it.label }.text
+        val reply = llm.respond(LlmTask.CAPTION, system = buildPrompt(mood), user = text)
+        lastUsedLabel = reply.label
+        withoutMoodLine(reply.text, mood).trim()
     }
 
     override suspend fun enhanceTemplate(
@@ -39,7 +52,7 @@ class RealCaptionEnhancer @Inject constructor(
         }.trim()
         val reply = llm.respond(LlmTask.CAPTION, system = buildPrompt(mood, templateMode = true), user = user)
         lastUsedLabel = reply.label
-        val parsed = parseTemplateReply(reply.text, wantHeading, wantCaption, fixedLabel)
+        val parsed = parseTemplateReply(withoutMoodLine(reply.text, mood), wantHeading, wantCaption, fixedLabel)
         (parsed.heading ?: heading) to (parsed.caption ?: caption)
     }
 

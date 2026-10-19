@@ -1,6 +1,7 @@
 package com.clipcut.domain.api.real
 
 import com.clipcut.domain.api.CaptionMood
+import com.clipcut.domain.api.DIALOGUE_RULES
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -13,11 +14,9 @@ class CaptionPromptsTest {
     }
 
     @Test
-    fun exactlyTheNinePresetsExistInTheSpecifiedOrder() {
+    fun exactlyTheFivePresetsExistInTheSpecifiedOrder() {
         assertEquals(
-            listOf(
-                "Dialogue", "Fight", "Emotional / Cute", "Fun", "Bashing", "Appreciation", "Savage", "Victory", "Shock",
-            ),
+            listOf("Fun", "Bashing", "Fight", "Emotional", "Appreciation"),
             CaptionMood.entries.filter { it != CaptionMood.AUTO }.map { it.label },
         )
     }
@@ -31,8 +30,31 @@ class CaptionPromptsTest {
             assertTrue(p.contains("Intensity:\n${mood.intensity}/10"))
             assertTrue(p.contains("Emoji level:\n${mood.emojiLevel}/3"))
             assertTrue(p.contains(mood.instructions.trim()))
+            assertTrue(p.contains("Feel (emojis and expressive characters, section 10):\n${mood.feel.trim()}"))
             assertTrue(p.trimEnd().endsWith("It must not change WHAT actually happened."))
         }
+    }
+
+    @Test
+    fun everyPromptAsksForEmojisAndExpressiveCharactersAndAFeltMood() {
+        for (mood in CaptionMood.entries) {
+            val p = buildPrompt(mood)
+            assertTrue(p.contains("10. MAKE IT FEEL: EMOJIS AND EXPRESSIVE CHARACTERS"))
+            assertTrue(p.contains("If the user wrote none, ADD them yourself."))
+            assertTrue(p.contains("I. Does a reader FEEL the mood"))
+        }
+        for (mood in CaptionMood.entries.filter { it != CaptionMood.AUTO }) {
+            assertTrue("${mood.label} has no feel palette", mood.feel.isNotBlank())
+            assertEquals(3, mood.emojiLevel)
+        }
+    }
+
+    @Test
+    fun eachMoodsFeelPaletteStaysInItsOwnBlock() {
+        val fight = buildPrompt(CaptionMood.FIGHT)
+        assertTrue(fight.contains("⚔️"))
+        assertFalse(fight.contains(CaptionMood.EMOTIONAL.feel.trim()))
+        assertFalse(buildPrompt(CaptionMood.EMOTIONAL).contains(CaptionMood.FIGHT.feel.trim()))
     }
 
     @Test
@@ -45,14 +67,13 @@ class CaptionPromptsTest {
 
     @Test
     fun specValuesAreExactForASample() {
-        assertEquals(10, CaptionMood.SAVAGE.intensity)
-        assertEquals(2, CaptionMood.DIALOGUE.emojiLevel)
+        assertEquals(9, CaptionMood.FIGHT.intensity)
         assertTrue(CaptionMood.EMOTIONAL.instructions.contains("Cute"))
     }
 
     @Test
     fun dialoguePolishesAndNeverRewrites() {
-        val p = buildPrompt(CaptionMood.DIALOGUE)
+        val p = buildPrompt(CaptionMood.AUTO)
         assertTrue(p.contains("DIALOGUE MODE -- POLISH, DO NOT REWRITE."))
         // It must explicitly beat the master prompt's "rewrite, don't polish" rule, which comes first.
         assertTrue(p.indexOf("DIALOGUE MODE") > p.indexOf("1. REWRITE, DON'T POLISH"))
@@ -63,7 +84,7 @@ class CaptionPromptsTest {
 
     @Test
     fun dialogueUsesTheSpeakerQuoteShapeAndContestantLabelsWhenUnnamed() {
-        val p = buildPrompt(CaptionMood.DIALOGUE)
+        val p = buildPrompt(CaptionMood.AUTO)
         assertTrue(p.contains("SPEAKER: \"What they said\""))
         assertTrue(p.contains("CONTESTANT A: \"Hi there!!\""))
         assertTrue(p.contains("CONTESTANT B: \"Hello, brother.\""))
@@ -74,20 +95,22 @@ class CaptionPromptsTest {
 
     @Test
     fun dialogueInATemplateNeverRewritesLinesToAvoidRepeatingTheHeading() {
-        val t = buildPrompt(CaptionMood.DIALOGUE, templateMode = true)
+        val t = buildPrompt(CaptionMood.AUTO, templateMode = true)
         assertTrue(t.contains("the spoken\n  lines are never changed to avoid repeating the heading"))
     }
 
     @Test
-    fun autoLooksBeyondThePresetsAndDoesNotSayWhichVoice() {
+    fun autoReadsTheUsersCuesPicksOneOfTheFiveMoodsAndNeverFlipsTheStance() {
         val p = buildPrompt(CaptionMood.AUTO)
         assertTrue(p.startsWith("You are an expert X (Twitter) caption editor"))
         assertTrue(p.contains("Mood: Auto"))
-        assertTrue(p.contains("You are NOT limited to a fixed list of moods."))
-        assertTrue(p.contains("READ THE MOMENT"))
-        assertTrue(p.contains("dry sarcasm"))
-        assertTrue(p.contains("MATCH THE SCALE TO THE MOMENT"))
-        assertTrue(p.contains("Do not tell the user which voice you chose."))
+        assertTrue(p.contains("READ THE USER'S CUES FIRST"))
+        assertTrue(p.contains("NEVER FLIP THE USER'S STANCE"))
+        assertTrue(p.contains("Praise never becomes mockery"))
+        for (mood in CaptionMood.entries.filter { it != CaptionMood.AUTO }) {
+            assertTrue("Auto does not offer ${mood.label}", p.contains("- ${mood.label} ("))
+            assertTrue(p.contains(mood.feel.trim().lines().first().trim()))
+        }
         assertFalse(p.contains("Intensity:"))
     }
 
@@ -95,8 +118,31 @@ class CaptionPromptsTest {
     fun autoHandsDialogueToTheDialogueRules() {
         val p = buildPrompt(CaptionMood.AUTO)
         assertTrue(p.contains("DIALOGUE IS A SPECIAL CASE"))
-        assertTrue(p.contains(CaptionMood.DIALOGUE.instructions.trim()))
-        assertTrue(p.trimEnd().endsWith("It must not change WHAT actually happened."))
+        assertTrue(p.contains(DIALOGUE_RULES))
+    }
+
+    @Test
+    fun onlyAutoAsksForAMoodLineAndVariantsNeverDo() {
+        val auto = buildPrompt(CaptionMood.AUTO)
+        assertTrue(auto.contains("MOOD LINE (Auto only)"))
+        assertTrue(auto.contains("MOOD: <Fun or Bashing or Fight or Emotional or Appreciation"))
+        assertTrue(auto.trimEnd().endsWith("It is never part of the caption."))
+        assertFalse(buildPrompt(CaptionMood.FIGHT).contains("MOOD LINE"))
+        assertFalse(buildVariantsPrompt(CaptionMood.AUTO, 3).contains("MOOD LINE"))
+    }
+
+    @Test
+    fun theMoodLineIsSplitOffAndShownWithItsEmoji() {
+        assertEquals("Fight" to "Qazi vs Arishfa!! ⚔️", parseLeadingMood("MOOD: Fight\nQazi vs Arishfa!! ⚔️"))
+        assertEquals("Fun + Bashing" to "line one\nline two", parseLeadingMood("mood: Fun + Bashing\n\nline one\nline two"))
+        // With a heading and a caption the template lines follow.
+        assertEquals("Emotional" to "HEADING: H\nCAPTION: C", parseLeadingMood("MOOD: Emotional\nHEADING: H\nCAPTION: C"))
+        // No mood line: the reply is untouched.
+        assertEquals(null to "Just a caption", parseLeadingMood("Just a caption"))
+        assertEquals("⚔️ Fight", moodDisplay("fight"))
+        assertEquals("😂 Fun + 🔥 Bashing", moodDisplay("Fun + Bashing"))
+        assertEquals("🎬 Dialogue", moodDisplay("Dialogue"))
+        assertEquals("Odd mood", moodDisplay("Odd mood"))
     }
 
     @Test

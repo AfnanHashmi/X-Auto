@@ -1,9 +1,8 @@
 package com.clipcut.domain.api
 
 /**
- * How Dialogue presents a conversation. It is the one mood that must NOT rewrite: the user writes the
- * lines, and the model only formats and polishes them. Shared with Auto, which switches to it when the
- * caption turns out to be dialogue.
+ * How a conversation is presented. It must NOT rewrite: the user writes the lines, and the model only formats and
+ * polishes them. Auto switches to it when the caption turns out to be dialogue.
  */
 internal const val DIALOGUE_RULES = """
 DIALOGUE MODE -- POLISH, DO NOT REWRITE.
@@ -27,8 +26,8 @@ POLISH -- ALLOWED
 - Capitalization, punctuation, spacing and line breaks.
 - Fixing obvious typos in English words. Hinglish words keep the user's own spelling.
 - Expressive punctuation (!!, ?!, ...) where the delivery clearly calls for it.
-- Emojis that fit how a line is said, placed after the closing quote. At most one per line, and not
-  on every line.
+- Emojis that carry how a line is said, placed after the closing quote. At most one per line, and not
+  on every line, but a line with clear feeling (anger, laughter, shock, hurt) should get one.
 
 NEVER
 - Change, replace, reorder, add or remove any spoken word. Every word stays; only the presentation changes.
@@ -57,6 +56,7 @@ ARISHFA: "Jo sach hai, wahi bol rahi hu."
 /**
  * A caption mood: how the enhancer should EXPRESS the caption (never what happened). [emoji] and
  * [label] are what the picker shows; the rest feeds the prompt (see `CaptionPrompts.buildPrompt`).
+ * [feel] is the palette of emojis and expressive characters that make a reader feel the mood.
  */
 enum class CaptionMood(
     val emoji: String,
@@ -66,19 +66,45 @@ enum class CaptionMood(
     val structure: String,
     val emojiLevel: Int,
     val instructions: String,
+    val feel: String = "",
 ) {
-    /** The default: the model reads the moment and chooses the voice itself, beyond this list if it fits. */
+    /** The default: the model reads the user's cues and picks one of the moods below (or a blend of two). */
     AUTO(
         "✨", "Auto",
         tone = "chosen automatically", intensity = 0,
         structure = "chosen automatically", emojiLevel = 0,
         instructions = "",
     ),
-    DIALOGUE(
-        "🎬", "Dialogue",
-        tone = "true to how each line was said", intensity = 5,
-        structure = "one SPEAKER: \"line\" per line", emojiLevel = 2,
-        instructions = DIALOGUE_RULES,
+    FUN(
+        "😂", "Fun",
+        tone = "funny, witty, playful", intensity = 7,
+        structure = "conversational, punchy", emojiLevel = 3,
+        instructions = """
+Make the caption playful and entertaining.
+Use wit, light humor, irony, or a clever observation when appropriate.
+Keep the humor natural rather than forcing a joke.
+Do not turn serious content into a joke unless the original supports it.
+""",
+        feel = """
+Emojis: 😂 😭 🤣 💀 👀 🙈 (😭 and 💀 also mean "I'm dead laughing"). Put one or two right after the punchline.
+Characters: ... for a deadpan beat, ?! for disbelief, a word in CAPS for the joke's stress, !! only when it is truly loud.
+""",
+    ),
+    BASHING(
+        "🔥", "Bashing",
+        tone = "sharp, critical, savage", intensity = 9,
+        structure = "short, cutting, direct", emojiLevel = 3,
+        instructions = """
+Make the criticism sharper and more impactful.
+Highlight the specific behavior or point being criticized.
+Use cutting but natural language.
+Do not invent accusations, misconduct, or facts.
+Keep criticism focused on the content or behavior described by the user.
+""",
+        feel = """
+Emojis: 🤡 💀 🙄 🤦 😒 🗑️ 🚩 (🤡 for hypocrisy, 🙄 for fake behaviour, 🚩 for a warning sign). One to three, at the cutting line.
+Characters: ... before the verdict, ?! for "are you serious", CAPS on the one word that stings, > or >> to set one thing against another.
+""",
     ),
     FIGHT(
         "⚔️", "Fight",
@@ -89,83 +115,41 @@ Make the caption feel intense and confrontational.
 Highlight the clash, disagreement, tension, or verbal battle already present.
 Use sharp wording and strong rhythm.
 Do not exaggerate the actual events beyond the user's input.
+When the fight lands as a shock, a short reaction line (😱 ?!) is allowed.
+""",
+        feel = """
+Emojis: ⚔️ 😤 🔥 💥 😡 🥊 🚨 (😱 for a shocking turn). Stack two or three at the peak, or end the hook line with one.
+Characters: !! for the hit, >> between the two sides, vs between names, CAPS on the loudest word, ?! for a dare.
 """,
     ),
     EMOTIONAL(
-        "🥹", "Emotional / Cute",
+        "🥹", "Emotional",
         tone = "heartfelt, sincere, sweet, wholesome", intensity = 7,
-        structure = "warm, smooth, reflective", emojiLevel = 2,
+        structure = "warm, smooth, reflective", emojiLevel = 3,
         instructions = """
 Bring out the feeling already in the moment. Decide which of two notes it carries, or both:
 - Emotional: heartfelt, touching, sincere. Relatable rather than melodramatic.
 - Cute: sweet, wholesome, charming. Affectionate or adorable, but never childish.
 Avoid clichés whenever possible, and never invent sentiment the moment does not have.
 """,
-    ),
-    FUN(
-        "😂", "Fun",
-        tone = "funny, witty, playful", intensity = 7,
-        structure = "conversational, punchy", emojiLevel = 2,
-        instructions = """
-Make the caption playful and entertaining.
-Use wit, light humor, irony, or a clever observation when appropriate.
-Keep the humor natural rather than forcing a joke.
-Do not turn serious content into a joke unless the original supports it.
-""",
-    ),
-    BASHING(
-        "🔥", "Bashing",
-        tone = "sharp, critical, savage", intensity = 9,
-        structure = "short, cutting, direct", emojiLevel = 2,
-        instructions = """
-Make the criticism sharper and more impactful.
-Highlight the specific behavior or point being criticized.
-Use cutting but natural language.
-Do not invent accusations, misconduct, or facts.
-Keep criticism focused on the content or behavior described by the user.
+        feel = """
+Emojis: 🥲 🥺 😭 ❤️ 🫶 🥹 💔 (💔 for hurt, 🫶 and ❤️ for love, 🥹 for "so proud"). Place them at the end of the line that carries the feeling.
+Characters: ... for a pause, a single ! at most, soft line breaks. Never shout in this mood.
 """,
     ),
     APPRECIATION(
         "👑", "Appreciation",
-        tone = "admiring, celebratory, warm", intensity = 7,
+        tone = "admiring, celebratory, warm", intensity = 8,
         structure = "positive, punchy", emojiLevel = 3,
         instructions = """
 Make the caption appreciative and celebratory.
 Highlight the quality, effort, personality, or moment already described.
 Make the praise feel specific rather than generic.
+A win or a comeback gets triumphant energy (but only if the caption establishes it).
 """,
-    ),
-    SAVAGE(
-        "💀", "Savage",
-        tone = "witty, ruthless, cutting", intensity = 10,
-        structure = "one-liner friendly, punchy", emojiLevel = 2,
-        instructions = """
-Make the caption sharper, wittier, and more cutting.
-Use clever phrasing, irony, contrast, or a strong punchline.
-Keep it grounded in the original input.
-Do not invent insults or factual accusations.
-""",
-    ),
-    VICTORY(
-        "🏆", "Victory",
-        tone = "triumphant, celebratory, powerful", intensity = 9,
-        structure = "bold, energetic", emojiLevel = 3,
-        instructions = """
-Make the caption feel triumphant and celebratory.
-Emphasize achievement, winning energy, dominance, comeback, or success when present.
-Use strong, confident wording.
-Do not claim victory if the original caption doesn't establish it.
-""",
-    ),
-    SHOCK(
-        "😱", "Shock",
-        tone = "surprised, dramatic, reaction-heavy", intensity = 9,
-        structure = "hook-first, reaction-driven", emojiLevel = 3,
-        instructions = """
-Maximize the feeling of surprise or disbelief already present.
-Lead with the strongest reaction.
-Use short sentences and dramatic punctuation when appropriate.
-Do not manufacture shock by inventing information.
+        feel = """
+Emojis: 👑 🔥 🙌 ✨ 💯 🏆 👏 (🏆 for a win, 👑 for a boss move, 🔥🔥 for hype). Two or three at the peak or after the praise.
+Characters: !! for excitement, CAPS on the name or the word of praise, *word* for emphasis, >> for "and that is why".
 """,
     );
 

@@ -1,6 +1,7 @@
 package com.clipcut.domain.api.real
 
 import com.clipcut.domain.api.CaptionMood
+import com.clipcut.domain.api.DIALOGUE_RULES
 
 /** The X caption editor's master system prompt: identical for every mood; the mood block is appended. */
 private const val MASTER_SYSTEM_PROMPT = """You are an expert X (Twitter) caption editor specializing in entertainment, reality shows, Bigg Boss-style commentary, celebrities, viral moments, pop culture, and highly conversational social-media content.
@@ -20,6 +21,10 @@ Do not merely capitalize words, add emojis, fix punctuation, correct grammar, or
 Substantially rewrite the caption whenever that makes it better. Preserve the underlying idea, but improve the hook, word choice, sentence structure, rhythm, flow, emotional impact, punchline, specificity and memorability.
 
 If the output could be described as "the original caption with emojis", the enhancement has FAILED.
+
+The finished caption must be informative (the concrete who, what and where of the moment stay visible), attractive
+(a strong hook and rhythm) and full of feeling: a reader should FEEL the mood from the words, the emojis and the
+punctuation together. See section 10.
 
 ━━━━━━━━━━━━━━━━━━━━
 2. EARN THE REACTION, NEVER BEG FOR IT
@@ -102,10 +107,26 @@ Hinglish in, Hinglish out: keep the natural internet-style Hindi-English mix and
 English in, English out. Use slang only where it matches the user's own tone.
 
 ━━━━━━━━━━━━━━━━━━━━
-10. EMOJIS
+10. MAKE IT FEEL: EMOJIS AND EXPRESSIVE CHARACTERS
 ━━━━━━━━━━━━━━━━━━━━
 
-Emojis support the writing; they are never the enhancement. Follow the mood's emoji level (0–3). Pick emojis that carry the actual emotion, and never use one to prop up a weak line.
+Every caption carries emojis AND expressive punctuation that match its feeling, the way people write on X today.
+If the user wrote none, ADD them yourself. Never remove the ones the user wrote.
+
+The SELECTED MOOD block gives a palette ("Feel"). Use it, and go with the trend: 😭 and 💀 also mean laughing hard,
+🔥🔥 and !! mean hype, 🥲🥺 mean a soft ache, 🤡 means hypocrisy, 👀 means "watch this".
+
+Examples of the feeling to aim for:
+- A win: "...!!🔥🔥"
+- Sadness: "...🥲🥺😭"
+- Fun: "...😂😭"
+
+Expressive characters are welcome where they carry the beat: !!, ?!, ..., >> or > to set one thing against another,
+*word* or a word in CAPS for stress, vs between names. Use each where it lands, not everywhere.
+
+Placement: at the emotional beats (end of the hook, after the punchline, two or three stacked at the peak), not on
+every line, and never random. Do not mix emojis that clash with the mood. No emoji wall, no repeated !!!!! strings.
+Emojis and characters give the line its feeling; they never replace words or prop up a weak line.
 
 ━━━━━━━━━━━━━━━━━━━━
 11. FACTS AND QUOTES
@@ -161,8 +182,10 @@ E. Does it invite reaction without begging for it?
 F. Is there a memorable phrase, contrast or payoff?
 G. Does it sound like a real X user, free of stock AI phrases?
 H. Did I keep the meaning, the facts, the quotes, the handles and the hashtags?
+I. Does a reader FEEL the mood from the words, emojis and punctuation together, with emojis and characters added if
+   the original had none?
 
-If A, B or C is NO, rewrite it. If it is just the original with emojis, rewrite it. If it contains engagement bait, remove it.
+If A, B, C or I is NO, rewrite it. If it is just the original with emojis, rewrite it. If it contains engagement bait, remove it.
 
 ━━━━━━━━━━━━━━━━━━━━
 OUTPUT
@@ -177,9 +200,8 @@ Do not wrap the caption in quotation marks and do not use markdown formatting. E
 The output must be immediately copy-pasteable into X."""
 
 /**
- * Auto, the default. It is deliberately not "pick one of the presets": the presets are a menu for when
- * you already know the voice you want, and Auto's job is the cases where you don't. So it reads the
- * moment first, may use a voice the menu has no button for, and hands dialogue to the Dialogue rules.
+ * Auto, the default. It reads the user's own cues and chooses one of the five moods (or a blend of two). Dialogue is
+ * handed to the dialogue rules. It never flips the user's stance.
  */
 private val AUTO_BLOCK = """━━━━━━━━━━━━━━━━━━━━
 SELECTED MOOD
@@ -187,38 +209,49 @@ SELECTED MOOD
 
 Mood: Auto
 
-You decide how this caption should sound. You are NOT limited to a fixed list of moods.
+You choose the mood from what the user wrote.
 
-1. FIRST, READ THE MOMENT (silently):
-- What actually happened, and who is involved?
-- What makes it worth posting: the conflict, the irony, the emotion, the absurdity, the skill, the
-  surprise, the awkwardness, the stakes?
-- How would the people watching this show react, and what would they say to each other about it?
-- What is the user's own stance: fan, critic, amused, shocked, moved, fed up? How strongly?
-- Is there a contrast, a turn, or a detail that is the real story rather than the obvious one?
+1. READ THE USER'S CUES FIRST (silently):
+- Their words and slang, the insults or praise, the laughs ("lol", "haha", 😂), exclamations, emojis they used.
+- Who they side with, and how strongly.
+- What actually happened, and who is involved.
+The user's own stance decides the mood. Do not impose a different one.
 
-2. THEN CHOOSE THE VOICE that serves that moment best.
-It can be a familiar register -- heated, savage, funny, heartfelt, sweet, triumphant, shocked,
-appreciative, critical -- or one that no preset covers: dry sarcasm, deadpan, mock-seriousness,
-suspense, irony, awkward cringe, quiet disbelief, nostalgia, romance, chaos, pure hype, or a blend of
-two when the moment is genuinely mixed (a fight that is also absurd, a win that is also emotional).
-Pick the most precise voice, not the loudest one.
+2. CHOOSE ONE MAIN MOOD (or a blend of two when the text truly mixes them):
+${autoMoodMenu()}
 
-3. MATCH THE SCALE TO THE MOMENT.
-Set intensity, rhythm, structure and emoji count to fit what happened, not to a preset level. A small
-moment gets a light touch; a huge one gets a big delivery. Never inflate a minor moment.
+3. NEVER FLIP THE USER'S STANCE.
+- Praise never becomes mockery. A sad moment never becomes a joke. Criticism never becomes praise.
+- If the cues are mixed or weak, use the clearest cue in the text and stay closer to the user's own wording.
+- Match the scale to the moment: a small moment gets a light touch, a huge one a big delivery.
 
-4. DIALOGUE IS A SPECIAL CASE.
+4. THEN APPLY THAT MOOD'S TONE AND FEEL PALETTE (above), including the emojis and expressive characters of section 10.
+
+5. DIALOGUE IS A SPECIAL CASE.
 If the caption is mainly an exchange of spoken lines between people (for example "qazi: ..." followed
 by "arishfa: ...", or lines that are clearly people talking to each other), do not rewrite it. Format
 and polish it exactly by these rules:
-${CaptionMood.DIALOGUE.instructions.trim()}
+$DIALOGUE_RULES
 
-Do not tell the user which voice you chose.
+Do not tell the user which voice you chose in the caption itself.
 
 Remember:
 The mood changes HOW the caption is expressed.
 It must not change WHAT actually happened."""
+
+/** The five moods Auto picks from, each with its tone, instructions and feel palette. */
+private fun autoMoodMenu(): String = CaptionMood.entries.filter { it != CaptionMood.AUTO }.joinToString("\n\n") { m ->
+    "- ${m.label} (${m.tone}):\n${m.instructions.trim().prependIndent("  ")}\n  Feel:\n${m.feel.trim().prependIndent("    ")}"
+}
+
+/** Appended for Auto only: the model states its reading on a first line that the app removes before showing the caption. */
+private val MOOD_LINE_BLOCK = """━━━━━━━━━━━━━━━━━━━━
+MOOD LINE (Auto only)
+━━━━━━━━━━━━━━━━━━━━
+
+Start your reply with one extra first line in exactly this form, then the rest of the reply exactly as specified above:
+MOOD: <${CaptionMood.entries.filter { it != CaptionMood.AUTO }.joinToString(" or ") { it.label }}, or Dialogue, or two of them joined with " + ">
+The MOOD line is read by the app and removed. It is never part of the caption."""
 
 private const val TEMPLATE_BLOCK = """━━━━━━━━━━━━━━━━━━━━
 TEMPLATE MODE
@@ -271,7 +304,7 @@ continues to the end of your reply."""
  * The master prompt plus the selected mood's block, exactly as specified for the backend; Auto swaps
  * in the "pick the best mood" block, and [templateMode] appends the heading/caption rules.
  */
-internal fun buildPrompt(mood: CaptionMood, templateMode: Boolean = false): String {
+internal fun buildPrompt(mood: CaptionMood, templateMode: Boolean = false, moodLine: Boolean = true): String {
     val moodBlock = if (mood == CaptionMood.AUTO) AUTO_BLOCK else """
 ━━━━━━━━━━━━━━━━━━━━
 SELECTED MOOD
@@ -294,12 +327,16 @@ ${mood.emojiLevel}/3
 Mood-specific instructions:
 ${mood.instructions.trim()}
 
+Feel (emojis and expressive characters, section 10):
+${mood.feel.trim()}
+
 Remember:
 The mood changes HOW the caption is expressed.
 It must not change WHAT actually happened.
 """.trim()
     val template = if (templateMode) "\n\n$TEMPLATE_BLOCK" else ""
-    return "$MASTER_SYSTEM_PROMPT\n\n$moodBlock$template".trim()
+    val readout = if (mood == CaptionMood.AUTO && moodLine) "\n\n$MOOD_LINE_BLOCK" else ""
+    return "$MASTER_SYSTEM_PROMPT\n\n$moodBlock$template$readout".trim()
 }
 
 // ---- caption variants ------------------------------------------------------------------------------------------------
@@ -308,7 +345,7 @@ const val MIN_VARIANTS = 3
 const val MAX_VARIANTS = 5
 
 /** The same caption rules and mood as a single rewrite, asking for [count] clearly different takes as JSON. */
-internal fun buildVariantsPrompt(mood: CaptionMood, count: Int): String = buildPrompt(mood) + """
+internal fun buildVariantsPrompt(mood: CaptionMood, count: Int): String = buildPrompt(mood, moodLine = false) + """
 
 
 ━━━━━━━━━━━━━━━━━━━━
@@ -351,4 +388,26 @@ internal fun parseVariants(json: String, count: Int): List<String> {
     val out = (0 until arr.length()).map { arr.optString(it).trim() }.filter { it.isNotEmpty() }.distinct().take(count)
     check(out.isNotEmpty()) { "The model returned no variants" }
     return out
+}
+
+// ---- the mood Auto read -----------------------------------------------------------------------------------------------
+
+private val MOOD_PREFIX = Regex("""^\s*MOOD:[ \t]*([^\r\n]*)[\r\n]+""", RegexOption.IGNORE_CASE)
+
+/** Splits the leading "MOOD: ..." line (Auto only) from the reply. No such line: the reply comes back unchanged with a null mood. */
+internal fun parseLeadingMood(reply: String): Pair<String?, String> {
+    val m = MOOD_PREFIX.find(reply) ?: return null to reply
+    val mood = m.groupValues[1].trim().trim('<', '>').takeIf { it.isNotEmpty() }
+    return mood to reply.substring(m.range.last + 1).trimStart('\r', '\n')
+}
+
+/** "Fight", "fight + fun", "Dialogue": the label with its emoji for the screen; text the app does not know is shown as it is. */
+internal fun moodDisplay(raw: String): String = raw.split('+').joinToString(" + ") { part ->
+    val name = part.trim()
+    val known = CaptionMood.entries.firstOrNull { it != CaptionMood.AUTO && it.label.equals(name, ignoreCase = true) }
+    when {
+        known != null -> "${known.emoji} ${known.label}"
+        name.equals("Dialogue", ignoreCase = true) -> "🎬 Dialogue"
+        else -> name
+    }
 }

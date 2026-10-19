@@ -210,7 +210,7 @@ class CaptionViewModel @Inject constructor(
     }
 
     fun selectMood(mood: CaptionMood) {
-        _uiState.update { it.copy(mood = mood) }
+        _uiState.update { it.copy(mood = mood, readMood = null) }
     }
 
     /** Switches the post layout. The heading and the caption are kept exactly as typed. */
@@ -254,7 +254,7 @@ class CaptionViewModel @Inject constructor(
                 onSuccess = { (heading, body) ->
                     pushUndo(before)
                     _uiState.update {
-                        it.copy(isEnhancing = false, heading = heading, body = body, statusMessage = captionEnhancer.lastUsedLabel?.let { l -> "Rewritten by $l" })
+                        it.copy(isEnhancing = false, heading = heading, body = body, readMood = captionEnhancer.lastReadMood, statusMessage = captionEnhancer.lastUsedLabel?.let { l -> "Rewritten by $l" })
                     }
                 },
                 onFailure = { e ->

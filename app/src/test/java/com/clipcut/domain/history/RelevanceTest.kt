@@ -48,7 +48,7 @@ class RelevanceTest {
 
     @Test
     fun overlappingCountsAreNotCountedTwice() {
-        val h = RunHistory(tmp.newFolder())
+        val h = RunHistory(tmp.newFolder(), nowMs = { NOW })
         // Two counts 2 hours apart over the same hours: 1,000 tweets an hour for 10 hours, so 10,000, not 20,000.
         h.saveTagline(count(NOW - 2 * HOUR_MS, Triple("QAZI THE POWERHOUSE", 1_000, 10)))
         h.saveTagline(count(NOW, Triple("QAZI THE POWERHOUSE", 1_000, 10)))
@@ -59,7 +59,7 @@ class RelevanceTest {
 
     @Test
     fun everySourceAddsUpIntoOneScoreWithItsFacts() {
-        val h = RunHistory(tmp.newFolder())
+        val h = RunHistory(tmp.newFolder(), nowMs = { NOW })
         h.saveTagline(count(NOW, Triple("QAZI THE POWERHOUSE", 3_000, 10), Triple("WE WANT NAKUL BACK", 1_000, 10)))
         h.saveBoss(BossMeterResult("1", 100, listOf(TagCount("#Qazi", 30), TagCount("#Nakul", 50), TagCount("#Uditi", 20)), NOW - HOUR_MS), "l", "contestants")
         h.saveBoss(BossMeterResult("2", 100, listOf(TagCount("#Nakul", 60), TagCount("#Qazi", 40)), NOW), "l", "finalists", final = true)

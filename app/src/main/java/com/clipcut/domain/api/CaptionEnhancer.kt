@@ -24,6 +24,9 @@ interface CaptionEnhancer {
      */
     suspend fun variants(text: String, mood: CaptionMood, count: Int, trending: String, highQuality: Boolean): Result<CaptionVariants>
 
+    /** The mood Auto read from the last text, with its emoji ("🔥 Fight"); null when the mood was chosen by hand or not stated. */
+    val lastReadMood: String?
+
     /** Who answered the last successful call ("xAI · grok-4.3"), for the status line. */
     val lastUsedLabel: String?
 }
