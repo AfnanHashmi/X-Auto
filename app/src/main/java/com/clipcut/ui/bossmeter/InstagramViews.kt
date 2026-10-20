@@ -1,6 +1,18 @@
 package com.clipcut.ui.bossmeter
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import com.clipcut.domain.publish.PublishStatus
+import com.clipcut.domain.share.ShareContent
+import com.clipcut.domain.share.instagramShare
+import com.clipcut.domain.share.overallShare
+import com.clipcut.ui.publish.PublishBanner
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -58,7 +70,13 @@ private fun LazyListScope.igNotices(state: BossMeterUiState) {
     }
 }
 
-fun LazyListScope.instagramView(state: BossMeterUiState, vm: BossMeterViewModel) {
+fun LazyListScope.instagramView(
+    state: BossMeterUiState,
+    vm: BossMeterViewModel,
+    publish: PublishStatus,
+    zone: ZoneId,
+    onShare: (ShareContent) -> Unit,
+) {
     igNotices(state)
     item {
         SectionCard("Instagram post") {
@@ -118,6 +136,31 @@ fun LazyListScope.instagramView(state: BossMeterUiState, vm: BossMeterViewModel)
     item { IgTable(ig) }
     item { IgSummary(ig) }
     item { IgExtras(ig) }
+    item {
+        ShareAndSend("Share on X", { onShare(instagramShare(ig, dateTimeText(ig.fetchedAtMs, zone))) }, publish, vm::retryIgPublish, vm::sendToWebsite)
+    }
+}
+
+/** Share on X (opens X with the image and caption; nothing is posted by the app) and the website send for this view. */
+@Composable
+private fun ShareAndSend(shareLabel: String, onShare: () -> Unit, publish: PublishStatus, onRetry: () -> Unit, onSend: () -> Unit) {
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        OutlinedButton(onClick = onShare, modifier = Modifier.fillMaxWidth()) { Text(shareLabel) }
+        Text(
+            "Opens X with the image and a caption (also copied); you check it and post it yourself.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        PublishBanner(publish, onRetry = onRetry)
+        OutlinedButton(onClick = onSend, enabled = publish != PublishStatus.Sending, modifier = Modifier.fillMaxWidth()) {
+            Text("↻ Send latest run to website")
+        }
+        Text(
+            "Sends X, Instagram and Overall together. No X calls, no cost.",
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
 }
 
 @Composable
@@ -192,7 +235,13 @@ private fun IgExtras(ig: IgBossResult) {
     }
 }
 
-fun LazyListScope.overallView(state: BossMeterUiState, zone: ZoneId) {
+fun LazyListScope.overallView(
+    state: BossMeterUiState,
+    vm: BossMeterViewModel,
+    publish: PublishStatus,
+    zone: ZoneId,
+    onShare: (ShareContent) -> Unit,
+) {
     igNotices(state)
     val o = state.overall
     if (o == null) {
@@ -200,6 +249,9 @@ fun LazyListScope.overallView(state: BossMeterUiState, zone: ZoneId) {
         return
     }
     item { OverallTable(o) }
+    item {
+        ShareAndSend("Share on X", { onShare(overallShare(o, dateTimeText(state.result?.fetchedAtMs ?: state.ig?.fetchedAtMs ?: 0L, zone))) }, publish, vm::retryOverallPublish, vm::sendToWebsite)
+    }
     item {
         SectionCard("Both added together") {
             Text("Total in both threads: ${n(o.total)}")
@@ -227,9 +279,33 @@ fun LazyListScope.overallView(state: BossMeterUiState, zone: ZoneId) {
     }
 }
 
+private val X_BAR = Color(0xFF78B4FF)
+private val IG_BAR = Color(0xFFFF78AA)
+
+/** One bar in two colours: the X part, then the Instagram part. The bar's length is this hashtag's total against the top one. */
+@Composable
+private fun TwoColorBar(x: Long, ig: Long, total: Long, top: Long) {
+    val parts = (x + ig).coerceAtLeast(1L)
+    Row(
+        modifier = Modifier.fillMaxWidth().height(10.dp).clip(RoundedCornerShape(5.dp)).background(MaterialTheme.colorScheme.surfaceVariant),
+    ) {
+        val len = (total.toFloat() / top.coerceAtLeast(1L)).coerceIn(0.01f, 1f)
+        Row(modifier = Modifier.fillMaxWidth(len)) {
+            if (x > 0) Box(modifier = Modifier.weight(x.toFloat() / parts).fillMaxHeight().background(X_BAR))
+            if (ig > 0) Box(modifier = Modifier.weight(ig.toFloat() / parts).fillMaxHeight().background(IG_BAR))
+        }
+    }
+}
+
 @Composable
 private fun OverallTable(o: Overall) {
     SectionCard("Overall (X + Instagram)") {
+        Row(horizontalArrangement = Arrangement.spacedBy(14.dp), verticalAlignment = Alignment.CenterVertically) {
+            Box(modifier = Modifier.size(10.dp).clip(RoundedCornerShape(2.dp)).background(X_BAR))
+            Text("X", style = MaterialTheme.typography.labelMedium)
+            Box(modifier = Modifier.size(10.dp).clip(RoundedCornerShape(2.dp)).background(IG_BAR))
+            Text("Instagram", style = MaterialTheme.typography.labelMedium)
+        }
         val top = o.rows.firstOrNull()?.total?.coerceAtLeast(1L) ?: 1L
         o.rows.forEachIndexed { i, r ->
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -237,7 +313,7 @@ private fun OverallTable(o: Overall) {
                     Text("${i + 1}. ${r.label}", style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
                     Text("${n(r.total)} (${"%.1f".format(r.share)}%)", style = MaterialTheme.typography.bodyMedium)
                 }
-                LinearProgressIndicator(progress = { r.total.toFloat() / top }, modifier = Modifier.fillMaxWidth())
+                TwoColorBar(r.x ?: 0L, r.ig ?: 0L, r.total, top)
                 Text(
                     "X ${r.x?.let(::n) ?: "no data"} · Instagram ${r.ig?.let(::n) ?: "no data"}",
                     style = MaterialTheme.typography.bodySmall,

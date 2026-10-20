@@ -40,17 +40,20 @@ data class ContestantWeek(
     val bossWins: Int,
     /** Best trending position typed when sharing (1 is best), if any. */
     val bestTrending: Int?,
+    /** Instagram comments (all of them, replies too) that mention them this week by hashtag, @handle or name; null: Instagram not included. */
+    val igMentions: Long? = null,
 )
 
 /** How much each fact weighs in the score. Each fact is scored against the week's best contestant for it (0 to 1). */
 val RELEVANCE_WEIGHTS = linkedMapOf(
-    "Tagline tweets" to 0.25,
-    "Original tweets" to 0.15,
-    "Tagline wins" to 0.10,
+    "Tagline tweets" to 0.20,
+    "Original tweets" to 0.12,
+    "Tagline wins" to 0.08,
     "Peak hour" to 0.05,
-    "Boss Meter share" to 0.25,
-    "Boss Meter wins" to 0.10,
+    "Boss Meter share" to 0.22,
+    "Boss Meter wins" to 0.08,
     "Trending" to 0.10,
+    "Instagram mentions" to 0.15,
 )
 
 /** A contestant's score (0 to 100) with the facts that justify it. */
@@ -62,6 +65,7 @@ data class Relevance(val week: ContestantWeek, val score: Int, val parts: Map<St
             if (week.taglineWins > 0) "${week.taglineWins} tagline ${if (week.taglineWins == 1) "win" else "wins"}" else null,
             week.bossShare?.let { "${"%.0f".format(it)}% Boss Meter votes" },
             if (week.bossWins > 0) "${week.bossWins} Boss Meter ${if (week.bossWins == 1) "win" else "wins"}" else null,
+            week.igMentions?.takeIf { it > 0 }?.let { "${short(it)} Instagram mentions" },
             week.bestTrending?.let { "best #$it Trending" },
         ).joinToString(" · ").take(200)
 }
@@ -77,7 +81,14 @@ private fun short(v: Long): String = when {
  * Builds each contestant's week from the history: tagline counts, Boss Meter runs and trending positions between
  * [sinceMs] and [untilMs]. [contestantOf] links a tagline or hashtag to a contestant (null: not counted for anyone).
  */
-fun weekStats(history: RunHistory, contestantOf: (String) -> String?, sinceMs: Long, untilMs: Long): List<ContestantWeek> {
+fun weekStats(
+    history: RunHistory,
+    contestantOf: (String) -> String?,
+    sinceMs: Long,
+    untilMs: Long,
+    /** Instagram comments mentioning each contestant (display name to count), when the Instagram side is included. */
+    igMentions: Map<String, Long>? = null,
+): List<ContestantWeek> {
     // Tagline counts: one value per tagline per hour, from the newest count that covered that hour.
     data class Hour(val all: Long, val originals: Long, val fetched: Long)
     val hours = HashMap<String, HashMap<Long, Hour>>() // tagline key -> hour start -> value
@@ -147,6 +158,13 @@ fun weekStats(history: RunHistory, contestantOf: (String) -> String?, sinceMs: L
     }
     boss.flatMap { it.result.tags }.forEach { t -> contestantOf(t.tag)?.let { display.putIfAbsent(it.lowercase(), it) } }
     history.trending(sinceMs).forEach { m -> contestantOf(m.tagline)?.let { display.putIfAbsent(it.lowercase(), it) } }
+    val ig = HashMap<String, Long>()
+    igMentions?.forEach { (name, n) ->
+        if (n > 0) {
+            ig[name.lowercase()] = (ig[name.lowercase()] ?: 0) + n
+            display.putIfAbsent(name.lowercase(), name)
+        }
+    }
 
     return display.map { (id, name) ->
         ContestantWeek(
@@ -160,6 +178,7 @@ fun weekStats(history: RunHistory, contestantOf: (String) -> String?, sinceMs: L
             bossPosts = shares[id]?.size ?: 0,
             bossWins = bossWins[id] ?: 0,
             bestTrending = trending[id],
+            igMentions = igMentions?.let { ig[id] ?: 0L },
         )
     }
 }
@@ -180,6 +199,7 @@ fun relevance(weeks: List<ContestantWeek>): List<Relevance> {
         "Boss Meter wins" to { w -> w.bossWins.toDouble() },
         // Trending #1 scores 1.0, #50 about 0.02; none scores 0.
         "Trending" to { w -> w.bestTrending?.let { (51.0 - it.coerceIn(1, 50)) / 50.0 } ?: 0.0 },
+        "Instagram mentions" to { w -> (w.igMentions ?: 0L).toDouble() },
     )
     val best = values.mapValues { (_, f) -> weeks.maxOfOrNull(f) ?: 0.0 }
     val used = RELEVANCE_WEIGHTS.filterKeys { (best[it] ?: 0.0) > 0.0 }

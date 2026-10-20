@@ -27,6 +27,7 @@ import com.clipcut.domain.bossmeter.BossMeterResult
 import com.clipcut.domain.publish.BossStage
 import com.clipcut.domain.publish.PublishStatus
 import androidx.compose.material3.SegmentedButton
+import com.clipcut.domain.share.ShareContent
 import com.clipcut.domain.share.bossMeterShare
 import com.clipcut.domain.taglines.dateTimeText
 import com.clipcut.ui.components.Screen
@@ -53,6 +54,11 @@ fun BossMeterScreen(
     val publish by viewModel.publishStatus.collectAsState()
     val context = LocalContext.current
     val zone = ZoneId.systemDefault()
+    val igPublish by viewModel.igPublishStatus.collectAsState()
+    val overallPublish by viewModel.overallPublishStatus.collectAsState()
+    val shareToX: (ShareContent) -> Unit = { c ->
+        ShareToX.share(context, c).let { o -> if (o.error != null) viewModel.showError(o.error) else viewModel.showInfo(o.message) }
+    }
 
     Screen(title = "Boss Meter", subtitle = "Hashtag votes in a post's replies. Reads only.", modifier = modifier) {
         LazyColumn(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(14.dp)) {
@@ -65,9 +71,9 @@ fun BossMeterScreen(
             }
             item { BossTabs(state, viewModel::setTab) }
             if (state.tab == BossTab.INSTAGRAM) {
-                instagramView(state, viewModel)
+                instagramView(state, viewModel, igPublish, zone, shareToX)
             } else if (state.tab == BossTab.OVERALL) {
-                overallView(state, zone)
+                overallView(state, viewModel, overallPublish, zone, shareToX)
             } else {
             item {
                 SectionCard("What to count") {

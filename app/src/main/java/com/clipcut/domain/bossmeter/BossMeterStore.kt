@@ -44,6 +44,9 @@ class BossMeterStore @Inject constructor(@ApplicationContext context: Context) {
         get() = prefs.getLong("igFetchedAt", 0L)
         set(v) = prefs.edit().putLong("igFetchedAt", v).apply()
 
+    /** The last Instagram result as the app can read it, or null. */
+    fun igResult(): IgBossResult? = igRaw.takeIf { it.isNotEmpty() }?.let { runCatching { parseIgBoss(it, igFetchedAt) }.getOrNull() }
+
     var hashtags: String
         get() = prefs.getString("hashtags", "").orEmpty()
         set(v) = prefs.edit().putString("hashtags", v).apply()

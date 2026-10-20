@@ -27,7 +27,13 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.clipcut.domain.bossmeter.BossMeterStore
+import com.clipcut.domain.bossmeter.IgBossApi
+import com.clipcut.domain.bossmeter.IgException
+import com.clipcut.domain.bossmeter.shortcodeFrom
 import com.clipcut.domain.history.ContestantStore
+import com.clipcut.domain.history.mentionKeys
+import kotlinx.coroutines.launch
 import com.clipcut.domain.history.RELEVANCE_WEIGHTS
 import com.clipcut.domain.history.Relevance
 import com.clipcut.domain.history.RunHistory
@@ -73,6 +79,9 @@ data class Top5UiState(
     val weekFromMs: Long = 0L,
     val week: String = "",
     val error: String? = null,
+    /** Instagram comments mentioning each contestant this week (display name to count), once the server has answered. */
+    val igMentions: Map<String, Long>? = null,
+    val igNote: String? = null,
 ) {
     val top: List<Relevance> get() = scores.filter { it.score > 0 }.take(5)
 }
@@ -82,6 +91,8 @@ class Top5ViewModel @Inject constructor(
     private val publisher: WebsitePublisher,
     private val history: RunHistory,
     private val contestants: ContestantStore,
+    private val instagram: IgBossApi,
+    private val bossStore: BossMeterStore,
 ) : ViewModel() {
     private val _state = MutableStateFlow(Top5UiState())
     val state: StateFlow<Top5UiState> = _state.asStateFlow()
@@ -93,25 +104,61 @@ class Top5ViewModel @Inject constructor(
         refresh()
     }
 
-    /** Recomputes this week's relevance from everything collected since Friday 6 PM. Free: no calls. */
+    /** Recomputes this week's relevance from everything collected since Friday 6 PM, Instagram mentions included. No X calls. */
     fun refresh() {
+        recompute()
+        viewModelScope.launch { if (loadInstagram()) recompute() }
+    }
+
+    private fun recompute() {
         val now = System.currentTimeMillis()
         val zone = ZoneId.systemDefault()
         val from = weekStart(now, zone)
         val links = contestants.snapshot()
-        val scores = relevance(weekStats(history, { text -> links[contestantKey(text)] ?: contestants.resolve(text) }, from, now))
+        val scores = relevance(weekStats(history, { text -> links[contestantKey(text)] ?: contestants.resolve(text) }, from, now, _state.value.igMentions))
         _state.update { it.copy(scores = scores, weekFromMs = from, week = weekLabel(from, zone), error = null) }
+    }
+
+    /**
+     * Asks the Instagram server how many comments (all of them, replies too) mention each contestant since the week began:
+     * votes, wrong hashtags, @handles and plain names. True when the numbers arrived. Not set up: the score is X only.
+     */
+    private suspend fun loadInstagram(): Boolean {
+        val code = shortcodeFrom(bossStore.igPost)
+        if (!instagram.isConfigured || code == null) {
+            _state.update { it.copy(igMentions = null, igNote = "Instagram is not included (set up the Instagram post on the Boss Meter screen).") }
+            return false
+        }
+        val now = System.currentTimeMillis()
+        val from = weekStart(now, ZoneId.systemDefault())
+        return try {
+            val m = instagram.mentions(code, mentionKeys(), from / 1000, now / 1000)
+            _state.update { it.copy(igMentions = m, igNote = "Instagram included: ${"%,d".format(m.values.sum())} mentions counted since the week began.") }
+            true
+        } catch (e: IgException) {
+            _state.update { it.copy(igMentions = null, igNote = "Instagram is NOT included: ${e.message}") }
+            false
+        }
     }
 
     /** Publishes exactly the list on screen, with each score and the facts behind it. Nothing is sent if the data gives no list. */
     fun publish() {
-        refresh()
-        val s = _state.value
-        val rows = s.top.map { r -> Top5Row(r.week.name, number = r.score.toString(), facts = "Relevance ${r.score}/100: ${r.factsLine}") }
-        try {
-            publisher.publish(top5Payload(s.week, rows, System.currentTimeMillis()))
-        } catch (e: PayloadException) {
-            _state.update { it.copy(error = if (rows.isEmpty()) "No data this week yet: run Tagline Counter or Boss Meter, and link taglines and hashtags to contestants." else e.message) }
+        viewModelScope.launch {
+            recompute()
+            val ok = loadInstagram()
+            // With Instagram set up but unreachable the list would rest on part of the data, so nothing is sent.
+            if (!ok && instagram.isConfigured && shortcodeFrom(bossStore.igPost) != null) {
+                _state.update { it.copy(error = "Not sent: the Instagram numbers could not be read, so the list would be incomplete. Check that the PC is on and Tailscale is connected, then try again.") }
+                return@launch
+            }
+            recompute()
+            val s = _state.value
+            val rows = s.top.map { r -> Top5Row(r.week.name, number = r.score.toString(), facts = "Relevance ${r.score}/100: ${r.factsLine}") }
+            try {
+                publisher.publish(top5Payload(s.week, rows, System.currentTimeMillis()))
+            } catch (e: PayloadException) {
+                _state.update { it.copy(error = if (rows.isEmpty()) "No data this week yet: run Tagline Counter or Boss Meter, and link taglines and hashtags to contestants." else e.message) }
+            }
         }
     }
 
@@ -128,7 +175,8 @@ fun Top5Screen(onExit: () -> Unit, viewModel: Top5ViewModel = hiltViewModel()) {
             SectionCard(state.week.ifEmpty { "This week" }) {
                 Text(
                     "From everything collected since ${dateTimeText(state.weekFromMs, zone)}: tagline tweets, original tweets, tagline wins, " +
-                        "peak hour, Boss Meter vote share and wins, trending positions. Each fact is compared with the week's best. " +
+                        "peak hour, Boss Meter vote share and wins, trending positions, and Instagram comments that mention them (votes, " +
+                        "other hashtags, @handles and names in text). Each fact is compared with the week's best. " +
                         "The week resets every Friday 6 PM.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -155,6 +203,7 @@ fun Top5Screen(onExit: () -> Unit, viewModel: Top5ViewModel = hiltViewModel()) {
                     Text(r.factsLine, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
+            state.igNote?.let { StatusRow(it, if (it.contains("NOT")) Tone.Bad else Tone.Neutral) }
             state.error?.let { StatusRow(it, Tone.Bad) }
             PublishBanner(publish, onRetry = viewModel::retry)
             OutlinedButton(onClick = viewModel::refresh, modifier = Modifier.fillMaxWidth()) { Text("↻ Recalculate from this week's data") }

@@ -24,6 +24,9 @@ import com.clipcut.domain.GalleryStore
  * Opens X's composer with the results image and the caption filled in. The user checks it and taps Post in X: the app
  * itself never posts. Falls back to the normal share sheet when the X app is not installed.
  */
+private val X_COLOR = Color.rgb(120, 180, 255)
+private val IG_COLOR = Color.rgb(255, 120, 170)
+
 object ShareToX {
     private const val X_PACKAGE = "com.twitter.android"
 
@@ -85,6 +88,19 @@ object ShareToX {
         val m = 60f
         cv.drawText(c.title, m, 100f, paint(58f, true, Color.WHITE))
         cv.drawText(c.subtitle, m, 145f, paint(28f, false, Color.rgb(190, 196, 215)))
+        if (c.twoColor) {
+            // legend, top right: the two colours of every bar
+            val lg = paint(26f, true, Color.WHITE)
+            val ig = "Instagram"
+            val xw = lg.measureText("X")
+            val iw = lg.measureText(ig)
+            var lx = w - m - iw - 22f
+            cv.drawText(ig, lx + 22f, 100f, lg)
+            cv.drawRoundRect(RectF(lx, 80f, lx + 16f, 96f), 4f, 4f, Paint(Paint.ANTI_ALIAS_FLAG).apply { color = IG_COLOR })
+            lx -= xw + 22f + 24f
+            cv.drawText("X", lx + 22f, 100f, lg)
+            cv.drawRoundRect(RectF(lx, 80f, lx + 16f, 96f), 4f, 4f, Paint(Paint.ANTI_ALIAS_FLAG).apply { color = X_COLOR })
+        }
 
         val top = 185f
         val bottom = h - 90f
@@ -103,8 +119,21 @@ object ShareToX {
             val barTop = y + labelP.textSize + 10f
             val barH = (rowH * 0.18f).coerceIn(8f, 16f)
             cv.drawRoundRect(RectF(m, barTop, w - m, barTop + barH), barH / 2, barH / 2, track)
-            bar.color = colors[i % colors.size]
-            cv.drawRoundRect(RectF(m, barTop, m + (w - 2 * m) * r.fraction.coerceIn(0.02f, 1f), barTop + barH), barH / 2, barH / 2, bar)
+            val barW = (w - 2 * m) * r.fraction.coerceIn(0.02f, 1f)
+            if (c.twoColor && r.split != null) {
+                // one bar, two colours: the X part first, then the Instagram part
+                val xW = barW * r.split.coerceIn(0f, 1f)
+                bar.color = IG_COLOR
+                cv.drawRoundRect(RectF(m, barTop, m + barW, barTop + barH), barH / 2, barH / 2, bar)
+                if (xW > 0f) {
+                    bar.color = X_COLOR
+                    cv.drawRoundRect(RectF(m, barTop, m + xW, barTop + barH), barH / 2, barH / 2, bar)
+                    if (xW < barW) cv.drawRect(RectF(m + maxOf(0f, xW - barH), barTop, m + xW, barTop + barH), bar)
+                }
+            } else {
+                bar.color = colors[i % colors.size]
+                cv.drawRoundRect(RectF(m, barTop, m + barW, barTop + barH), barH / 2, barH / 2, bar)
+            }
         }
         val footP = paint(22f, false, Color.rgb(170, 176, 196))
         cv.drawText(TextUtils.ellipsize(c.footer, footP, w - 2 * m, TextUtils.TruncateAt.END).toString(), m, h - 45f, footP)

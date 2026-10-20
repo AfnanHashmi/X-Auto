@@ -127,6 +127,22 @@ interface IgBossApi {
 
     /** The watcher's state for [shortcode], or null when the server is not watching it. */
     suspend fun status(shortcode: String): IgWatch?
+
+    /**
+     * Comments (all of them, replies too) that mention each contestant by hashtag, @handle or plain text, between
+     * [sinceTs] and [untilTs] (unix seconds). Contestant name to number of comments. Free: the server counts.
+     */
+    suspend fun mentions(shortcode: String, keys: List<com.clipcut.domain.history.MentionKeys>, sinceTs: Long, untilTs: Long?): Map<String, Long>
+}
+
+/** Reads the server's `/mentions` reply: contestant name to the number of comments that mention them. */
+fun parseMentions(body: String): Map<String, Long> {
+    try {
+        val arr = JSONObject(body).getJSONArray("contestants")
+        return (0 until arr.length()).associate { i -> arr.getJSONObject(i).let { it.getString("name") to it.getLong("comments") } }
+    } catch (e: JSONException) {
+        throw IgException("The Instagram server's mentions reply was not what was expected")
+    }
 }
 
 class RealIgBossApi(
@@ -171,6 +187,19 @@ class RealIgBossApi(
         send(request("watch").post(body).build())
         Unit
     }
+
+    override suspend fun mentions(shortcode: String, keys: List<com.clipcut.domain.history.MentionKeys>, sinceTs: Long, untilTs: Long?): Map<String, Long> =
+        withContext(Dispatchers.IO) {
+            val body = JSONObject().put(
+                "contestants",
+                JSONArray(keys.map { JSONObject().put("name", it.name).put("strong", JSONArray(it.strong)).put("single", JSONArray(it.single)) }),
+            ).toString().toRequestBody("application/json".toMediaType())
+            val req = request("mentions/$shortcode") { b ->
+                b.addQueryParameter("since_ts", sinceTs.toString())
+                if (untilTs != null) b.addQueryParameter("until_ts", untilTs.toString())
+            }.post(body).build()
+            parseMentions(send(req))
+        }
 
     override suspend fun status(shortcode: String): IgWatch? = withContext(Dispatchers.IO) {
         val arr = try {

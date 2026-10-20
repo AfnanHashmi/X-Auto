@@ -137,6 +137,15 @@ class BossMeterViewModel @Inject constructor(
 
     fun retryPublish() = publisher.retry(MeterKind.BOSS)
 
+    /** The website's state for the Instagram and Overall views of the last run. */
+    val igPublishStatus: StateFlow<PublishStatus> = publisher.status.map { it.getValue(MeterKind.BOSS_IG) }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, PublishStatus.Idle)
+    val overallPublishStatus: StateFlow<PublishStatus> = publisher.status.map { it.getValue(MeterKind.BOSS_OVERALL) }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, PublishStatus.Idle)
+
+    fun retryIgPublish() = publisher.retry(MeterKind.BOSS_IG)
+    fun retryOverallPublish() = publisher.retry(MeterKind.BOSS_OVERALL)
+
     private val _state = MutableStateFlow(
         BossMeterUiState(
             link = store.link,
@@ -221,7 +230,7 @@ class BossMeterViewModel @Inject constructor(
      * Gets the Instagram counts for the tracked hashtags. [untilTs] cuts the count off at that moment, so a count made with
      * X's lines up with it. A failure here never touches the X result.
      */
-    private fun fetchInstagram(untilTs: Long?) {
+    private fun fetchInstagram(untilTs: Long?, then: (IgBossResult) -> Unit = {}) {
         val s = _state.value
         val code = s.igShortcode
         if (!s.igConfigured || code == null || s.hashtags.isEmpty()) return
@@ -233,6 +242,7 @@ class BossMeterViewModel @Inject constructor(
                 store.igFetchedAt = r.fetchedAtMs
                 _state.update { it.copy(igBusy = false, ig = r) }
                 refreshWatch()
+                then(r)
             } catch (e: IgException) {
                 _state.update { it.copy(igBusy = false, igError = e.message) }
             }
@@ -326,7 +336,11 @@ class BossMeterViewModel @Inject constructor(
                 is BossMeterOutcome.Failed -> _state.update { it.copy(running = false, progress = null, error = out.reason) }
             }
             // Instagram is counted when X is: up to the moment of X's count, so both sides cover the same time.
-            fetchInstagram((out as? BossMeterOutcome.Done)?.result?.fetchedAtMs?.div(1000))
+            val done = out as? BossMeterOutcome.Done
+            fetchInstagram(done?.result?.fetchedAtMs?.div(1000)) {
+                // The website gets the Instagram and Overall views of this run once the Instagram numbers are in.
+                if (done != null) sync.sendInstagramViews(done.result, s.link, s.stage, s.final)
+            }
         }
     }
 
