@@ -63,6 +63,12 @@ fun BossMeterScreen(
                     if (state.error != null || state.message != null) TextButton(onClick = viewModel::dismiss) { Text("Dismiss") }
                 }
             }
+            item { BossTabs(state, viewModel::setTab) }
+            if (state.tab == BossTab.INSTAGRAM) {
+                instagramView(state, viewModel)
+            } else if (state.tab == BossTab.OVERALL) {
+                overallView(state, zone)
+            } else {
             item {
                 SectionCard("What to count") {
                     OutlinedTextField(
@@ -140,6 +146,7 @@ fun BossMeterScreen(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
+            }
             }
         }
         TextButton(onClick = onExit) { Text("Back") }

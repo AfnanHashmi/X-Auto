@@ -53,6 +53,8 @@ android {
             "UNFOLLOW_URL", "UNFOLLOW_TOKEN",
             // The website the Boss Meter and Tagline Counter results are published to: the bearer key it accepts.
             "WEBSITE_PUBLISH_KEY",
+            // Boss Meter's Instagram side: the igscraper server's address and its X-API-Key.
+            "IG_BASE_URL", "IG_API_KEY",
         )) {
             buildConfigField("String", key, "\"${localProperties.getProperty(key, "")}\"")
         }

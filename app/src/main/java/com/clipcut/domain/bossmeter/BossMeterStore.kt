@@ -26,6 +26,24 @@ class BossMeterStore @Inject constructor(@ApplicationContext context: Context) {
         get() = prefs.getString("readPostId", "").orEmpty()
         set(v) = prefs.edit().putString("readPostId", v).apply()
 
+    /** The Instagram post being counted (its link or shortcode). */
+    var igPost: String
+        get() = prefs.getString("igPost", "").orEmpty()
+        set(v) = prefs.edit().putString("igPost", v).apply()
+
+    /** Leave out the comments Instagram hides behind "View hidden comments". */
+    var igExcludeHidden: Boolean
+        get() = prefs.getBoolean("igExcludeHidden", false)
+        set(v) = prefs.edit().putBoolean("igExcludeHidden", v).apply()
+
+    /** The last Instagram reply (raw JSON) and when it arrived. */
+    var igRaw: String
+        get() = prefs.getString("igRaw", "").orEmpty()
+        set(v) = prefs.edit().putString("igRaw", v).apply()
+    var igFetchedAt: Long
+        get() = prefs.getLong("igFetchedAt", 0L)
+        set(v) = prefs.edit().putLong("igFetchedAt", v).apply()
+
     var hashtags: String
         get() = prefs.getString("hashtags", "").orEmpty()
         set(v) = prefs.edit().putString("hashtags", v).apply()
