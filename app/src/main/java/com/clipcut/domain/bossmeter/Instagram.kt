@@ -129,10 +129,11 @@ interface IgBossApi {
     suspend fun status(shortcode: String): IgWatch?
 
     /**
-     * Manual mode: tells the server to fetch every comment since the last stored one, and waits until it is done (or
-     * [maxWaitMs] passes). A server that polls continuously has nothing to catch up, so that case returns at once.
+     * Manual mode: tells the server to fetch every comment since the last stored one. Returns at once; the work runs on the
+     * server whether or not the phone stays connected, and [status] shows "catching up" until it is done. A server that
+     * polls continuously has nothing to catch up, so that case does nothing.
      */
-    suspend fun catchUp(shortcode: String, maxWaitMs: Long = 15 * 60_000L)
+    suspend fun startCatchUp(shortcode: String)
 
     /**
      * Comments (all of them, replies too) that mention each contestant by hashtag, @handle or plain text, between
@@ -207,21 +208,13 @@ class RealIgBossApi(
             parseMentions(send(req))
         }
 
-    override suspend fun catchUp(shortcode: String, maxWaitMs: Long) {
-        withContext(Dispatchers.IO) {
-            try {
-                send(request("watch/$shortcode/catchup").post(ByteArray(0).toRequestBody(null)).build())
-            } catch (e: IgException) {
-                if (e.httpCode == 409) return@withContext // continuous mode: always up to date
-                throw e
-            }
+    override suspend fun startCatchUp(shortcode: String): Unit = withContext(Dispatchers.IO) {
+        try {
+            send(request("watch/$shortcode/catchup").post(ByteArray(0).toRequestBody(null)).build())
+        } catch (e: IgException) {
+            if (e.httpCode != 409) throw e // 409: continuous mode, always up to date
         }
-        val deadline = nowMs() + maxWaitMs
-        while (nowMs() < deadline) {
-            kotlinx.coroutines.delay(3_000)
-            val w = status(shortcode) ?: return
-            if (!w.status.startsWith("catching up")) return
-        }
+        Unit
     }
 
     override suspend fun status(shortcode: String): IgWatch? = withContext(Dispatchers.IO) {

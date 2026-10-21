@@ -217,27 +217,63 @@ class BossMeterViewModel @Inject constructor(
             try {
                 val w = instagram.status(code)
                 _state.update { it.copy(igWatch = w) }
+                // A catch-up started earlier (even from another visit to this screen) is still running on the server: pick it up.
+                if (w?.status?.startsWith("catching up") == true) waitForCatchUp(code)
             } catch (e: IgException) {
                 _state.update { it.copy(igError = e.message) }
             }
         }
     }
 
+    private var waitingCatchUp = false
+
+    /**
+     * Follows a catch-up that runs on the server. The work does not depend on the phone: leaving the screen or losing the
+     * connection to the PC for a while does not stop it, and a status check that fails is simply tried again. When the
+     * screen is opened again while it is still running, this picks it up from [refreshWatch]. Counts are loaded when it ends.
+     */
+    private fun waitForCatchUp(code: String) {
+        if (waitingCatchUp) return
+        waitingCatchUp = true
+        _state.update { it.copy(igBusy = true, igError = null, igMessage = "The PC is fetching new Instagram comments. You can leave this screen; it keeps going and the numbers update when you come back.") }
+        viewModelScope.launch {
+            var done = false
+            try {
+                val deadline = System.currentTimeMillis() + 45 * 60_000L
+                while (System.currentTimeMillis() < deadline) {
+                    delay(3_000)
+                    val w = try { instagram.status(code) } catch (e: IgException) { null } // connection hiccup: keep waiting
+                    if (w != null) {
+                        _state.update { it.copy(igWatch = w) }
+                        if (!w.status.startsWith("catching up")) { done = true; break }
+                    }
+                }
+            } finally {
+                waitingCatchUp = false
+                _state.update { it.copy(igBusy = false) }
+            }
+            if (done) {
+                _state.update { it.copy(igMessage = "Caught up with Instagram.") }
+                if (_state.value.hashtags.isNotEmpty()) fetchInstagram(null)
+            } else {
+                _state.update { it.copy(igError = "Still catching up on the PC. Open this screen again in a few minutes, then tap Recount.", igMessage = null) }
+            }
+        }
+    }
+
     /**
      * The only thing that makes the server fetch new comments from Instagram (it is in manual mode and idle otherwise).
-     * Waits until the server has caught up, then recounts. Free: X is not called.
+     * The PC does the work in its own time (it carries on if you leave the screen); counts load when it is done. Free: X is not called.
      */
     fun catchUpInstagram() {
         val s = _state.value
         val code = s.igShortcode
         if (!s.igConfigured || code == null || s.igBusy) return
-        _state.update { it.copy(igBusy = true, igError = null, igMessage = "Fetching new Instagram comments… a few minutes after a long gap") }
+        _state.update { it.copy(igBusy = true, igError = null, igMessage = "Asking the PC to fetch new comments…") }
         viewModelScope.launch {
             try {
-                instagram.catchUp(code)
-                _state.update { it.copy(igBusy = false, igMessage = "Caught up with Instagram.") }
-                refreshWatch()
-                if (s.hashtags.isNotEmpty()) fetchInstagram(null)
+                instagram.startCatchUp(code) // returns at once; the PC does the work
+                waitForCatchUp(code)
             } catch (e: IgException) {
                 _state.update { it.copy(igBusy = false, igError = e.message) }
             }
