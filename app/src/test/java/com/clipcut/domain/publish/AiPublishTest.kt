@@ -2,11 +2,10 @@ package com.clipcut.domain.publish
 
 import com.clipcut.domain.taglines.CountReport
 import com.clipcut.domain.taglines.CountSeries
-import com.clipcut.domain.taglines.DeepLook
 import com.clipcut.domain.taglines.HourBucket
 import com.clipcut.domain.taglines.TaglineAnalysis
 import com.clipcut.domain.taglines.TaglineCount
-import com.clipcut.domain.taglines.Voice
+import com.clipcut.domain.taglines.fxCheck
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -22,22 +21,19 @@ private fun t(name: String, n: Long) = TaglineCount(name, CountSeries(n, listOf(
 private val RUN = CountReport(END - 24 * 3_600_000L, END, END + 30_000, listOf(t("QAZI THE POWERHOUSE OF BB20", 49_107), t("WE WANT NAKUL BACK", 16_361)))
 
 private val READOUT = TaglineAnalysis("Qazi leads with 49,107 tweets", listOf("Leads #2 by 32,746", "Most retweet-driven"), "Fading fast", "Frame the lead", "OpenAI · gpt-5.6-terra", 0.02, END + 600_000)
-private val LOOK = DeepLook(
-    "QAZI THE POWERHOUSE OF BB20", 18, listOf("Fans defend him", "Powerhouse of the house"),
-    listOf(Voice("@fan_account_one", "1,646 likes"), Voice("not a handle", "x"), Voice("@example_account", "")),
-    listOf("https://x.com/fan_account_one/status/2111503685482344508", "https://evil.example/1"), 0.105, "xAI · grok-4.3", END + 900_000,
-    changes = "@example_account is new", reportAtMs = END + 30_000,
-)
 
 class AiPublishTest {
-    private fun send(readout: TaglineAnalysis? = null, looks: Map<String, DeepLook> = emptyMap(), steady: Map<String, List<Pair<String, Int>>> = emptyMap()) =
-        JSONObject(trendPayload(RUN, IST, readout, looks, steady).json)
+    private fun send(readout: TaglineAnalysis? = null, checks: Map<String, com.clipcut.domain.taglines.TrendCheckResult> = emptyMap()) =
+        JSONObject(trendPayload(RUN, IST, readout, checks).json)
 
     @Test
     fun withNoAiTheRunIsExactlyAsBefore() {
         val j = send()
         assertFalse(j.has("readout"))
-        for (i in 0 until j.getJSONArray("items").length()) assertFalse(j.getJSONArray("items").getJSONObject(i).has("deepLook"))
+        for (i in 0 until j.getJSONArray("items").length()) {
+            assertFalse(j.getJSONArray("items").getJSONObject(i).has("trendCheck"))
+            assertFalse(j.getJSONArray("items").getJSONObject(i).has("deepLook")) // Deep look is gone
+        }
     }
 
     @Test
@@ -52,41 +48,35 @@ class AiPublishTest {
     }
 
     @Test
-    fun deepLooksGoOnlyOnTheTaglinesThatHaveOne() {
-        val j = send(looks = mapOf(LOOK.tagline to LOOK), steady = mapOf(LOOK.tagline to listOf("@fan_account_one" to 3, "@once" to 1)))
+    fun trendChecksGoOnlyOnTheTaglinesThatHaveOne() {
+        val c = fxCheck("QAZI THE POWERHOUSE OF BB20")
+        val j = send(checks = mapOf(c.tagline to c))
         val items = j.getJSONArray("items")
-        val d = items.getJSONObject(0).getJSONObject("deepLook")
-        assertFalse(items.getJSONObject(1).has("deepLook")) // Nakul had no Deep look
-        assertEquals(2, d.getJSONArray("themes").length())
-        assertEquals(2, d.getJSONArray("voices").length()) // the fake handle is dropped
-        assertEquals("1,646 likes", d.getJSONArray("voices").getJSONObject(0).getString("note"))
-        assertFalse(d.getJSONArray("voices").getJSONObject(1).has("note")) // no empty note
-        assertEquals(1, d.getJSONArray("posts").length()) // only real x.com post links
-        assertEquals("@example_account is new", d.getString("changes"))
-        assertEquals(1, d.getJSONArray("steadyVoices").length()); assertEquals(3, d.getJSONArray("steadyVoices").getJSONObject(0).getInt("looks"))
-        assertEquals(18, d.getInt("postsRead")); assertEquals("xai", d.getString("provider")); assertEquals("grok-4.3", d.getString("model"))
-        assertFalse(j.has("readout")) // a Deep look without a read-out
+        assertFalse(items.getJSONObject(1).has("trendCheck")) // Nakul had no Trend check
+        val d = items.getJSONObject(0).getJSONObject("trendCheck")
+        assertEquals(38, d.getInt("naturalPct")); assertEquals(22, d.getInt("botLikePct")); assertEquals(41, d.getInt("copyPastePct"))
+        assertEquals(200, d.getInt("sample")); assertEquals("sudden", d.getString("launch")); assertTrue(d.getBoolean("ended"))
+        assertEquals(90, d.getInt("retweetPct")); assertEquals(2, d.getInt("replyPct")); assertEquals(1, d.getInt("quotePct"))
+        assertEquals(1, d.getJSONArray("organizers").length()) // the fake handle is dropped
+        assertEquals("@fan_account_one", d.getJSONArray("organizers").getJSONObject(0).getString("handle"))
+        assertEquals(1, d.getJSONArray("pairedHashtags").length()) // "bad tag" is dropped
+        val s = d.getJSONObject("sentiment")
+        assertEquals(60, s.getInt("positive")); assertEquals(20, s.getInt("negative")); assertEquals(30, s.getJSONObject("byContestant").getJSONArray("Qazi Jee").getInt(0))
+        assertEquals("openai", d.getString("provider"))
+        assertFalse(j.has("readout")) // a check without a read-out
     }
 
     @Test
-    fun richerDeepLookFieldsGoAlong() {
-        val rich = LOOK.copy(starters = listOf(Voice("@first_fan", "6:31 PM")), rivals = listOf("UDITI STANDS BY HER PEOPLE"), pairedHashtags = listOf("#BiggBoss20"), size = "Max")
-        val d = deepLookJson(rich)!!
-        assertEquals("@first_fan", d.getJSONArray("starters").getJSONObject(0).getString("handle"))
-        assertEquals("6:31 PM", d.getJSONArray("starters").getJSONObject(0).getString("when"))
-        assertEquals("UDITI STANDS BY HER PEOPLE", d.getJSONArray("rivalTaglines").getString(0))
-        assertEquals("#BiggBoss20", d.getJSONArray("pairedHashtags").getString(0))
-        assertEquals("max", d.getString("size"))
-        assertFalse(deepLookJson(LOOK)!!.has("starters")) // left out when there are none
+    fun aCheckWithOnlyTheExactCountsSendsNoSampleFigures() {
+        val d = JSONObject(trendCheckJson(fxCheck("Q", withSample = false)).toString())
+        assertTrue(d.has("retweetPct")); assertTrue(d.has("launch"))
+        assertFalse(d.has("sample")); assertFalse(d.has("naturalPct")); assertFalse(d.has("sentiment")); assertFalse(d.has("organizers"))
     }
 
     @Test
     fun bothTogetherAndNothingEmptyIsEverSent() {
-        val j = send(readout = READOUT, looks = mapOf(LOOK.tagline to LOOK))
-        assertTrue(j.has("readout")); assertTrue(j.getJSONArray("items").getJSONObject(0).has("deepLook"))
-        val bare = deepLookJson(LOOK.copy(voices = emptyList(), examplePosts = emptyList(), changes = "", postsRead = 0, label = "", atMs = 0))!!
-        assertEquals(setOf("themes"), bare.keys().asSequence().toSet())
-        assertNull(deepLookJson(LOOK.copy(themes = listOf(" "))))
+        val j = send(readout = READOUT, checks = mapOf("QAZI THE POWERHOUSE OF BB20" to fxCheck("QAZI THE POWERHOUSE OF BB20")))
+        assertTrue(j.has("readout")); assertTrue(j.getJSONArray("items").getJSONObject(0).has("trendCheck"))
         assertNull(readoutJson(READOUT.copy(headline = "  ")))
         assertFalse(readoutJson(READOUT.copy(insights = emptyList()))!!.has("insights"))
     }

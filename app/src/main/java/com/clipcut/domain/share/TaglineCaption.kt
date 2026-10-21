@@ -33,7 +33,7 @@ fun aiCredit(labels: List<String>): String? {
 
 /**
  * The post text. Heading from [stage]; then the counts; with [longPost] (X Premium) also the whole AI read-out and each
- * Deep look with its top voices tagged, ending with which Grok model wrote them, tagged @xai. Without [longPost] it is
+ * Trend check lines, ending with which model wrote the analysis. Without [longPost] it is
  * cut to one ordinary post (280), keeping the heading, counts, the main voices and the credit.
  */
 fun taglineCaption(
@@ -84,7 +84,7 @@ fun taglineCaption(
         blocks += (listOf("🧠 AI read-out", a.headline) + a.insights.map { "• $it" } + "Momentum: ${a.momentum}").joinToString("\n")
     }
     stats.filter { it.hasLook }.forEach { s ->
-        val lines = mutableListOf("🔎 What fans are saying: ${s.tagline}" + (s.samplePosts?.let { " ($it posts read)" } ?: ""))
+        val lines = mutableListOf("🔎 Trend check: ${s.tagline}" + (s.samplePosts?.let { " (sample of $it posts)" } ?: ""))
         lines += s.themes.map { "• $it" }
         voicesByTagline[s.tagline]?.takeIf { it.isNotEmpty() }?.let { lines += "Top voices: " + it.joinToString(" ") }
         blocks += lines.joinToString("\n")

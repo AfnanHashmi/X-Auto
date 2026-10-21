@@ -68,11 +68,11 @@ object TaglineImage {
         return kept
     }
 
-    /** The Deep look lines under a card's figures: a label, up to three themes, then the top voices. */
+    /** The Trend check lines under a card's figures: a label, up to three themes, then the top voices. */
     private fun lookRows(s: TaglineStat): List<Pair<String, TextPaint>> {
         if (!s.hasLook) return emptyList()
         val rows = mutableListOf<Pair<String, TextPaint>>()
-        rows += "WHAT PEOPLE ARE SAYING" + (s.samplePosts?.let { "  ·  Grok read $it posts" } ?: "") to paint(19f, true, Color.rgb(150, 180, 255))
+        rows += "TREND CHECK" + (s.samplePosts?.let { "  ·  sample of $it posts" } ?: "") to paint(19f, true, Color.rgb(150, 180, 255))
         s.themes.forEach { t -> wrap("• $t", lookPaint(), TEXT_W, 2).forEach { rows += it to lookPaint() } }
         if (s.voices.isNotEmpty()) wrap("Top voices: " + s.voices.joinToString("  "), voicePaint(), TEXT_W, 2).forEach { rows += it to voicePaint() }
         return rows

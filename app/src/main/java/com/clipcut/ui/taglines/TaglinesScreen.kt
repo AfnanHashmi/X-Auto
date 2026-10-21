@@ -55,10 +55,7 @@ import com.clipcut.domain.share.taglineShareCard
 import com.clipcut.domain.share.taglineStat
 import com.clipcut.domain.taglines.COUNTS_LIMITS_NOTE
 import com.clipcut.domain.taglines.CountReport
-import com.clipcut.domain.taglines.DEEP_LOOK_DAILY_CAP_USD
-import com.clipcut.domain.taglines.DEEP_LOOK_ESTIMATE_USD
-import com.clipcut.domain.taglines.DeepLook
-import com.clipcut.domain.taglines.DeepLookSize
+import com.clipcut.domain.taglines.TrendCheckResult
 import com.clipcut.domain.taglines.TaglineCount
 import com.clipcut.domain.taglines.clockText
 import com.clipcut.domain.taglines.dateTimeText
@@ -115,7 +112,7 @@ fun TaglinesScreen(
                             Text("↻ Send latest run to website")
                         }
                         Text(
-                            "Sends what is already here (counts, read-out, Deep looks). No X calls, no cost.",
+                            "Sends what is already here (counts, read-out, Trend checks). No X calls, no cost.",
                             style = MaterialTheme.typography.labelMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -124,13 +121,8 @@ fun TaglinesScreen(
                 items(report.counts, key = { it.tagline }) { c ->
                     TaglineCard(
                         report, c, zone,
-                        look = state.deepLooks[c.tagline],
-                        lookCount = state.lookCounts[c.tagline] ?: 0,
-                        regulars = state.regulars[c.tagline].orEmpty(),
-                        looking = state.deepLooking == c.tagline,
-                        lookBusy = state.deepLooking != null,
-                        onDeepLook = { viewModel.askDeepLook(c.tagline) },
-                        onOpen = { url -> context.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(url))) },
+                        check = state.checks[c.tagline],
+                        onTrendCheck = { viewModel.openTrend(c.tagline) },
                     )
                 }
                 item { Chart(report, zone) }
@@ -163,7 +155,7 @@ fun TaglinesScreen(
                 sharing = false
                 val card = taglineShareCard(
                     shareReport, dateTimeText(shareReport.fetchedAtMs, zone), zone, positions,
-                    looks = state.deepLooks, readout = state.analysis, stage = stage, longPost = state.longPosts,
+                    checks = state.checks, readout = state.analysis, stage = stage, longPost = state.longPosts,
                 )
                 viewModel.recordTrending(shareReport.fetchedAtMs, positions)
                 ShareToX.share(context, card, zone).let { o -> if (o.error != null) viewModel.showError(o.error) else viewModel.showInfo(o.message) }
@@ -171,39 +163,10 @@ fun TaglinesScreen(
         )
     }
 
-    state.confirmDeepLook?.let { tagline ->
-        val blocked = viewModel.lookSizeBlocked()
-        AlertDialog(
-            onDismissRequest = viewModel::cancelDeepLook,
-            title = { Text("Deep look?") },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text(
-                        "Grok (xAI) searches X for \"$tagline\" in the counted period and reports themes, top voices, who started it, " +
-                            "rival taglines, paired hashtags and posts to open. Bigger sizes read more posts.",
-                    )
-                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        DeepLookSize.entries.forEach { sz ->
-                            FilterChip(
-                                selected = state.lookSize == sz,
-                                onClick = { viewModel.setLookSize(sz) },
-                                label = { Text("${sz.label} $" + "%.2f".format(sz.budgetUsd), maxLines = 1, softWrap = false) },
-                            )
-                        }
-                    }
-                    Text(
-                        "About ${state.lookSize.posts} posts, up to ${state.lookSize.searches} searches. xAI's real cost is shown after; it can land a little over or under. " +
-                            "Today: $" + "%.2f".format(viewModel.deepLookSpentToday()) + " of the $" + "%.2f".format(DEEP_LOOK_DAILY_CAP_USD) + " daily limit. Read only; nothing is posted.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    blocked?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }
-                }
-            },
-            confirmButton = {
-                Button(onClick = viewModel::confirmDeepLook, enabled = blocked == null) { Text("Look (about $" + "%.2f".format(state.lookSize.budgetUsd) + ")") }
-            },
-            dismissButton = { TextButton(onClick = viewModel::cancelDeepLook) { Text("Cancel") } },
+    state.trend?.let { ui ->
+        TrendCheckDialog(
+            viewModel, ui, zone,
+            onOpen = { url -> context.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(url))) },
         )
     }
 
@@ -216,7 +179,7 @@ fun TaglinesScreen(
                     Text(
                         "Sends the figures on this screen (no tweets, no X calls) to ${viewModel.analysisLabel() ?: "the LLM"}. " +
                             (viewModel.analysisEstimateUsd()?.let { "About $" + "%.3f".format(it) + ". " } ?: "") +
-                            "It reads the numbers and any Deep looks; it does not search X itself.",
+                            "It reads the numbers and any Trend checks; it does not search X itself.",
                     )
                     if (viewModel.analysisHasHigherTier()) {
                         FilterChip(
@@ -280,7 +243,7 @@ private fun ShareDialog(
                     Column(modifier = Modifier.weight(1f)) {
                         Text("Long post (X Premium)", style = MaterialTheme.typography.titleSmall)
                         Text(
-                            if (longPost) "Full AI read-out and Deep looks, with top voices tagged." else "One ordinary post (280 characters): the main numbers only.",
+                            if (longPost) "Full AI read-out and Trend checks." else "One ordinary post (280 characters): the main numbers only.",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -339,7 +302,7 @@ private fun AiReadout(state: TaglinesUiState, onAsk: () -> Unit) {
         Text("Momentum: ${a.momentum}", style = MaterialTheme.typography.bodyMedium)
         Text("Post angle: ${a.captionAngle}", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.primary)
         Text(
-            "Written by ${a.label} from the counts and any Deep looks" + (a.costUsd?.let { ", about $" + "%.4f".format(it) } ?: "") + ". Check it before you post.",
+            "Written by ${a.label} from the counts and any Trend checks" + (a.costUsd?.let { ", about $" + "%.4f".format(it) } ?: "") + ". Check it before you post.",
             style = MaterialTheme.typography.labelMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -406,13 +369,8 @@ private fun TaglineCard(
     r: CountReport,
     c: TaglineCount,
     zone: ZoneId,
-    look: DeepLook?,
-    lookCount: Int,
-    regulars: List<Pair<String, Int>>,
-    looking: Boolean,
-    lookBusy: Boolean,
-    onDeepLook: () -> Unit,
-    onOpen: (String) -> Unit,
+    check: TrendCheckResult?,
+    onTrendCheck: () -> Unit,
 ) {
     val stat = remember(r, c) { taglineStat(r, c) }
     SectionCard(c.tagline) {
@@ -421,17 +379,10 @@ private fun TaglineCard(
         stat.detailLines(zone).forEach { line ->
             Text(line, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
-        if (look != null) {
-            DeepLookSection(look, lookCount, regulars, onOpen)
-        }
+        if (check != null) TrendCheckSummary(check, zone)
         if (c.all.total > 0) {
-            TextButton(onClick = onDeepLook, enabled = !lookBusy) {
-                if (looking) {
-                    CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
-                    Text("  Grok is reading posts…")
-                } else {
-                    Text((if (look != null) "Look again: what's new" else "Deep look: top voices and themes") + " (from $" + "%.2f".format(DEEP_LOOK_ESTIMATE_USD) + ")")
-                }
+            TextButton(onClick = onTrendCheck) {
+                Text(if (check != null) "Trend check: open or update" else "Trend check: natural or organized? (from about $0.005)")
             }
         }
     }
@@ -470,60 +421,5 @@ private fun Chart(r: CountReport, zone: ZoneId) {
                 Text(t.tagline, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(start = 8.dp))
             }
         }
-    }
-}
-
-/** Grok's read of a sample of this tagline's posts. Handles and posts open in X. Always labelled as a sample. */
-@Composable
-private fun DeepLookSection(look: DeepLook, lookCount: Int, regulars: List<Pair<String, Int>>, onOpen: (String) -> Unit) {
-    Column(verticalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.padding(top = 6.dp)) {
-        Text(
-            "DEEP LOOK" + if (lookCount > 1) "  ·  $lookCount looks kept" else "",
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.primary,
-        )
-        look.themes.forEach { Text("• $it", style = MaterialTheme.typography.bodyMedium) }
-        if (look.changes.isNotBlank()) {
-            Text("New since earlier looks: ${look.changes}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.tertiary)
-        }
-        if (look.voices.isNotEmpty()) {
-            Text("Top voices in the sample", style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(top = 4.dp))
-            look.voices.forEach { v ->
-                Column(modifier = Modifier.fillMaxWidth().clickable { onOpen("https://x.com/${v.handle.removePrefix("@")}") }.padding(vertical = 2.dp)) {
-                    Text(v.handle, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.primary)
-                    if (v.why.isNotBlank()) Text(v.why, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-            }
-        }
-        if (look.starters.isNotEmpty()) {
-            Text(
-                "Started by: " + look.starters.joinToString(", ") { v -> v.handle + (v.why.takeIf { it.isNotBlank() }?.let { " ($it)" } ?: "") },
-                style = MaterialTheme.typography.bodySmall,
-            )
-        }
-        if (look.rivals.isNotEmpty()) {
-            Text("Rivals pushing at the same time: " + look.rivals.joinToString(", "), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        }
-        if (look.pairedHashtags.isNotEmpty()) {
-            Text("Used with: " + look.pairedHashtags.joinToString(" "), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        }
-        if (regulars.isNotEmpty()) {
-            Text(
-                "Steady drivers: " + regulars.take(5).joinToString(", ") { (h, n) -> "$h ($n looks)" },
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-        if (look.examplePosts.isNotEmpty()) {
-            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                look.examplePosts.forEachIndexed { i, url -> TextButton(onClick = { onOpen(url) }) { Text("Post ${i + 1}") } }
-            }
-        }
-        Text(
-            "Grok (${look.label}" + (look.size.takeIf { it.isNotBlank() }?.let { ", $it" } ?: "") + ") read ${look.postsRead} posts: a sample, not all of them" +
-                (look.costUsd?.let { ". Cost $" + "%.3f".format(it) } ?: "") + ".",
-            style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
     }
 }

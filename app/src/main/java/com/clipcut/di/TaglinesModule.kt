@@ -2,8 +2,12 @@ package com.clipcut.di
 
 import android.content.Context
 import com.clipcut.domain.llm.LlmClient
-import com.clipcut.domain.taglines.DeepLookService
-import com.clipcut.domain.taglines.DeepLookStore
+import com.clipcut.domain.history.ContestantStore
+import com.clipcut.domain.taglines.RealTrendSearchApi
+import com.clipcut.domain.taglines.TrendCheckService
+import com.clipcut.domain.taglines.TrendCheckStore
+import com.clipcut.domain.taglines.TrendSearchApi
+import com.clipcut.domain.taglines.judgeSentiment
 import dagger.hilt.android.qualifiers.ApplicationContext
 import com.clipcut.domain.taglines.RealTaglinesApi
 import com.clipcut.domain.taglines.TaglineAnalyst
@@ -20,6 +24,7 @@ import javax.inject.Singleton
 @InstallIn(SingletonComponent::class)
 abstract class TaglinesBindings {
     @Binds abstract fun bindApi(impl: RealTaglinesApi): TaglinesApi
+    @Binds abstract fun bindTrendSearch(impl: RealTrendSearchApi): TrendSearchApi
 }
 
 @Module
@@ -35,9 +40,18 @@ object TaglinesProvides {
 
     @Provides
     @Singleton
-    fun provideDeepLookStore(@ApplicationContext context: Context): DeepLookStore = DeepLookStore(context)
+    fun provideTrendStore(@ApplicationContext context: Context): TrendCheckStore = TrendCheckStore(context)
 
     @Provides
     @Singleton
-    fun provideDeepLook(llm: LlmClient, store: DeepLookStore): DeepLookService = DeepLookService(llm, store)
+    fun provideTrendCheck(
+        counts: TaglinesApi,
+        search: TrendSearchApi,
+        llm: LlmClient,
+        store: TrendCheckStore,
+        contestants: ContestantStore,
+    ): TrendCheckService = TrendCheckService(
+        counts, search, store, contestants = { contestants.knownNames() },
+        judge = { posts, names -> judgeSentiment(llm, posts, names) },
+    )
 }

@@ -33,23 +33,22 @@ class TaglineAnalyst(private val llm: LlmClient) {
 
     val hasHigherTier: Boolean get() = llm.hasHigherTier(LlmTask.ANALYSIS)
 
-    /** About 2,000 tokens in (the figures, Deep looks, last count) and 1,500 out (reasoning included). */
+    /** About 2,000 tokens in (the figures, Trend checks, last count) and 1,500 out (reasoning included). */
     fun estimateUsd(highQuality: Boolean): Double? = llm.estimateUsd(LlmTask.ANALYSIS, highQuality, 2_000, 1_500)
 
     /**
-     * [looks] are this count's Deep looks by tagline, [history] every earlier look (for the steady top voices), and
-     * [previous] the last read-out of an earlier count, so the new one can say what moved since then. All optional.
+     * [checks] are the newest Trend check per tagline, and [previous] the last read-out of an earlier count, so the new
+     * one can say what moved since then. All optional.
      */
     suspend fun analyze(
         report: CountReport,
         zone: ZoneId,
         highQuality: Boolean = false,
-        looks: Map<String, DeepLook> = emptyMap(),
-        history: List<DeepLook> = emptyList(),
+        checks: Map<String, TrendCheckResult> = emptyMap(),
         previous: ReadoutRecord? = null,
         nowMs: Long = System.currentTimeMillis(),
     ): TaglineAnalysis {
-        val facts = taglineFacts(report, zone, looks, history, previous)
+        val facts = taglineFacts(report, zone, checks, previous)
         val reply = llm.respond(LlmTask.ANALYSIS, SYSTEM, facts, ANALYSIS_SCHEMA, highQuality)
         return checkNumbers(parseAnalysis(reply.text), facts).copy(label = reply.label, costUsd = reply.costUsd, atMs = nowMs)
     }
@@ -61,8 +60,9 @@ You are given exact figures from X's official counts endpoint. You cannot see an
 
 Rules:
 - Use only the figures given. Quote numbers exactly as given; do not invent or extrapolate any.
-- Do not claim causes, moods, sentiment, bots, or who posted, EXCEPT what a DEEP LOOK section states (that is
-  Grok's reading of a sample of real posts: say "in a sample of posts" when you use it).
+- Do not claim causes, moods, sentiment, bots, or who posted, EXCEPT what a TREND CHECK section states. Its
+  "exact" lines come from counts; its "sample" lines are estimates from a sample of real posts: say "in a sample of
+  N posts" when you use them, and call accounts "bot-like", never "bots".
 - If PREVIOUS COUNT is given, say how the totals moved since then.
 - Be concrete and short. Plain English a fan page admin can act on.
 
@@ -93,8 +93,7 @@ Return JSON:
 fun taglineFacts(
     report: CountReport,
     zone: ZoneId,
-    looks: Map<String, DeepLook> = emptyMap(),
-    history: List<DeepLook> = emptyList(),
+    checks: Map<String, TrendCheckResult> = emptyMap(),
     previous: ReadoutRecord? = null,
 ): String {
     val card = taglineShareCard(report, dateTimeText(report.fetchedAtMs, zone), zone)
@@ -107,15 +106,7 @@ fun taglineFacts(
             s.shareText?.let { append(" (").append(it).append(')') }
             append('\n')
             s.detailLines(zone).forEach { append("- ").append(it).append('\n') }
-            looks[s.tagline]?.let { l ->
-                append("DEEP LOOK (Grok read ").append(l.postsRead).append(" posts):\n")
-                append("- themes: ").append(l.themes.joinToString(" | ")).append('\n')
-                if (l.voices.isNotEmpty()) append("- top voices: ").append(l.voices.joinToString(", ") { v -> v.handle + (v.why.takeIf { it.isNotBlank() }?.let { " ($it)" } ?: "") }).append('\n')
-                if (l.changes.isNotBlank()) append("- new since earlier looks: ").append(l.changes).append('\n')
-            }
-            regulars(history.filter { it.tagline.equals(s.tagline, ignoreCase = true) }).take(5).takeIf { it.isNotEmpty() }?.let { r ->
-                append("- steady top voices across looks: ").append(r.joinToString(", ") { (h, n) -> "$h ($n looks)" }).append('\n')
-            }
+            checks[s.tagline]?.let { c -> append(trendCheckFacts(c, zone)) }
         }
         previous?.takeIf { it.reportAtMs != report.fetchedAtMs }?.let { p ->
             append("\nPREVIOUS COUNT (").append(dateTimeText(p.reportAtMs, zone)).append("): ")
@@ -156,4 +147,24 @@ fun checkNumbers(a: TaglineAnalysis, facts: String): TaglineAnalysis {
     val kept = a.insights.filter { bad(it).isEmpty() }
     if (kept.isEmpty()) throw LlmException("Every finding quoted numbers that are not in the data, so the read-out was not kept. Write it again.")
     return a.copy(insights = kept)
+}
+
+/** The Trend check lines the read-out may use: exact ones from counts, and sample ones with the sample size. */
+fun trendCheckFacts(c: TrendCheckResult, zone: ZoneId): String = buildString {
+    append("TREND CHECK (").append(dateTimeText(c.startMs, zone)).append(" to ").append(dateTimeText(c.endMs, zone))
+        .append(if (c.ended) ", ended" else ", still running").append("):\n")
+    append("- exact: ").append(c.shares.retweetPct).append("% retweets, ").append(c.shares.replyPct).append("% replies, ")
+        .append(c.shares.quotePct).append("% quotes\n")
+    c.launch?.let { append("- exact: launch was ").append(it.label).append('\n') }
+    if (c.waves.size > 1) append("- exact: ").append(c.waves.size).append(" push waves\n")
+    c.stats?.let { s ->
+        append("- sample of ").append(s.sample).append(" posts (estimates): about ").append(s.naturalPct).append("% natural, ")
+            .append(s.botLikePct).append("% from bot-like accounts, ").append(s.copyPastePct).append("% copy-pasted text, ")
+            .append(s.newAccountPct).append("% from accounts under 30 days old, ").append(s.fanClubPct).append("% from fan-club style accounts\n")
+        if (s.organizers.isNotEmpty()) append("- most retweeted accounts in the sample: ").append(s.organizers.joinToString(", ") { it.first }).append('\n')
+    }
+    c.sentiment?.takeIf { it.total > 0 }?.let { m ->
+        append("- sentiment in the sample: ").append(pct(m.positive.toLong(), m.total.toLong())).append("% positive, ")
+            .append(pct(m.negative.toLong(), m.total.toLong())).append("% negative, ").append(pct(m.neutral.toLong(), m.total.toLong())).append("% neutral\n")
+    }
 }

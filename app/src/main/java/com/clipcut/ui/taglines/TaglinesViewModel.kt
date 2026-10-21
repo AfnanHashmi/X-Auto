@@ -22,12 +22,16 @@ import com.clipcut.domain.publish.SyncResult
 import com.clipcut.domain.publish.WebsiteSync
 import com.clipcut.domain.history.HistorySummary
 import com.clipcut.domain.history.RunHistory
-import com.clipcut.domain.taglines.DeepLook
-import com.clipcut.domain.taglines.DeepLookSize
-import com.clipcut.domain.taglines.DeepLookService
-import com.clipcut.domain.taglines.DeepLookStore
+import com.clipcut.domain.taglines.Detected
+import com.clipcut.domain.taglines.HOUR_MS
 import com.clipcut.domain.taglines.ReadoutRecord
-import com.clipcut.domain.taglines.regulars
+import com.clipcut.domain.taglines.TrendCheckException
+import com.clipcut.domain.taglines.TrendCheckResult
+import com.clipcut.domain.taglines.TrendCheckService
+import com.clipcut.domain.taglines.TrendCheckStore
+import com.clipcut.domain.taglines.TrendPlan
+import com.clipcut.domain.taglines.TrendRange
+import com.clipcut.domain.taglines.usdText
 import com.clipcut.domain.taglines.TaglineAnalysis
 import com.clipcut.domain.taglines.TaglineAnalyst
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -57,18 +61,11 @@ data class TaglinesUiState(
     /** The AI read-out's cost box is open. */
     val confirmingAnalysis: Boolean = false,
     val analysisHighQuality: Boolean = false,
-    /** Deep looks for this count, by tagline. Paid for, so kept with the count. */
-    val deepLooks: Map<String, DeepLook> = emptyMap(),
-    /** The tagline whose Deep look is running, if any. */
-    val deepLooking: String? = null,
-    /** The tagline whose Deep look cost box is open. */
-    val confirmDeepLook: String? = null,
-    /** The Deep look size chosen in the cost box. */
-    val lookSize: DeepLookSize = DeepLookSize.STANDARD,
-    /** How many Deep looks are kept per tagline (all counts), and the accounts that keep coming up as top voices. */
-    val lookCounts: Map<String, Int> = emptyMap(),
-    val regulars: Map<String, List<Pair<String, Int>>> = emptyMap(),
-    /** Share as a long post (X Premium) with the full read-out and Deep looks; off keeps the post text to 280 characters. */
+    /** The newest Trend check per tagline. Paid for, so kept on the phone and used by the read-out, share, website and ranking. */
+    val checks: Map<String, TrendCheckResult> = emptyMap(),
+    /** The Trend check panel, while it is open. */
+    val trend: TrendUi? = null,
+    /** Share as a long post (X Premium) with the full read-out and Trend checks; off keeps the post text to 280 characters. */
     val longPosts: Boolean = true,
     /** Which contestant each tagline counts for in the weekly ranking. */
     val contestants: Map<String, String> = emptyMap(),
@@ -78,6 +75,20 @@ data class TaglinesUiState(
     val estimatedCostUsd: Double get() = estimatedCostUsd(taglines.size)
 }
 
+/** The Trend check panel for one tagline: the range found (editable), the exact numbers, and the sample once bought. */
+data class TrendUi(
+    val tagline: String,
+    /** What is running right now, or null when idle. */
+    val busy: String? = null,
+    val range: TrendRange? = null,
+    val check: TrendCheckResult? = null,
+    val budgetText: String = "1.00",
+    val error: String? = null,
+    val notice: String? = null,
+) {
+    val budget: Double? get() = budgetText.toDoubleOrNull()
+}
+
 @HiltViewModel
 class TaglinesViewModel @Inject constructor(
     private val service: TaglinesService,
@@ -85,13 +96,13 @@ class TaglinesViewModel @Inject constructor(
     private val publisher: WebsitePublisher,
     private val pool: XReadPool,
     private val analyst: TaglineAnalyst,
-    private val deepLook: DeepLookService,
-    private val deepLookStore: DeepLookStore,
+    private val trendService: TrendCheckService,
+    private val trendStore: TrendCheckStore,
     private val history: RunHistory,
     private val contestants: ContestantStore,
     private val sync: WebsiteSync,
 ) : ViewModel() {
-    /** Sends the latest run (with its AI read-out and Deep looks) to the website again. No X calls, no cost. */
+    /** Sends the latest run (with its AI read-out and Trend checks) to the website again. No X calls, no cost. */
     fun sendToWebsite() {
         when (val r = sync.sendTagline()) {
             SyncResult.Queued -> Unit // the banner shows Updating / Website updated / Not updated
@@ -114,16 +125,19 @@ class TaglinesViewModel @Inject constructor(
             TaglinesUiState(
                 taglines = store.taglines(),
                 report = r,
-                deepLooks = r?.let { deepLookStore.looksFor(it.fetchedAtMs) }.orEmpty(),
-                analysis = r?.let { deepLookStore.readoutFor(it.fetchedAtMs) },
+                checks = checksFor(r?.counts?.map { it.tagline }.orEmpty() + store.taglines()),
+                analysis = r?.let { trendStore.readoutFor(it.fetchedAtMs) },
                 longPosts = store.longPosts,
             )
         },
     )
     val state: StateFlow<TaglinesUiState> = _state.asStateFlow()
 
+    private fun checksFor(taglines: List<String>): Map<String, TrendCheckResult> =
+        taglines.distinct().mapNotNull { t -> trendStore.forTagline(t).firstOrNull()?.let { t to it } }.toMap()
+
     init {
-        refreshHistory()
+        refreshChecks()
         _state.value.taglines.forEach { contestants.linkIfNew(it) }
         refreshContestants()
     }
@@ -153,12 +167,7 @@ class TaglinesViewModel @Inject constructor(
         if (positions.isNotEmpty()) refreshContestants()
     }
 
-    /** Counts of kept looks and the steady top voices per tagline, from the whole history. */
-    private fun refreshHistory() {
-        val all = deepLookStore.allLooks()
-        val byTagline = all.groupBy { it.tagline }
-        _state.update { s -> s.copy(lookCounts = byTagline.mapValues { it.value.size }, regulars = byTagline.mapValues { regulars(it.value) }) }
-    }
+    private fun refreshChecks() = _state.update { st -> st.copy(checks = checksFor(st.taglines + st.report?.counts?.map { it.tagline }.orEmpty())) }
 
     fun setLongPosts(on: Boolean) {
         store.longPosts = on
@@ -204,7 +213,7 @@ class TaglinesViewModel @Inject constructor(
                 is CountOutcome.Done -> {
                     store.saveReport(out.report)
                     history.saveTagline(out.report) // every count is kept for the timeline and the weekly ranking
-                    _state.update { it.copy(running = false, report = out.report, analysis = null, deepLooks = emptyMap(), message = "Counted from X. About $${"%.3f".format(estimatedCostUsd(out.report.counts.size))} billed by X. Paid by ${paidByText(callsBefore, pool.calls.value)}.") }
+                    _state.update { it.copy(running = false, report = out.report, analysis = null, message = "Counted from X. About $${"%.3f".format(estimatedCostUsd(out.report.counts.size))} billed by X. Paid by ${paidByText(callsBefore, pool.calls.value)}.") }
                     refreshContestants()
                     publishTrend() // after the result is on screen
                 }
@@ -241,14 +250,13 @@ class TaglinesViewModel @Inject constructor(
         _state.update { it.copy(confirmingAnalysis = false, analysing = true, error = null, message = null) }
         viewModelScope.launch {
             try {
-                // Built on this count's Deep looks, every earlier look (steady voices) and the last read-out of an earlier count.
+                // Built on the newest Trend check of each tagline and the last read-out of an earlier count.
                 val a = analyst.analyze(
                     report, ZoneId.systemDefault(), s.analysisHighQuality,
-                    looks = s.deepLooks,
-                    history = deepLookStore.allLooks(),
-                    previous = deepLookStore.previousReadout(report.fetchedAtMs),
+                    checks = s.checks,
+                    previous = trendStore.previousReadout(report.fetchedAtMs),
                 )
-                deepLookStore.addReadout(ReadoutRecord(report.fetchedAtMs, report.counts.associate { it.tagline to it.all.total }, a))
+                trendStore.addReadout(ReadoutRecord(report.fetchedAtMs, report.counts.associate { it.tagline to it.all.total }, a))
                 if (_state.value.report?.fetchedAtMs == report.fetchedAtMs) {
                     _state.update { it.copy(analysing = false, analysis = a) }
                     publishTrend() // the same run again, now with the read-out
@@ -263,61 +271,128 @@ class TaglinesViewModel @Inject constructor(
         }
     }
 
-    /** Spent today on Deep looks, and the cap, for the cost box. */
-    fun deepLookSpentToday(): Double = deepLook.spentToday()
+    // ---- Trend check ------------------------------------------------------------------------------------------------
 
-    fun askDeepLook(tagline: String) {
-        val s = _state.value
-        if (s.report == null || s.deepLooking != null) return
-        // The smallest size must fit today's limit; a bigger one is checked when chosen.
-        deepLook.blockedReason(DeepLookSize.STANDARD)?.let { r -> _state.update { it.copy(error = r, message = null) }; return }
-        _state.update { it.copy(confirmDeepLook = tagline, error = null, message = null) }
+    fun trendSpentToday(): Double = trendService.spentToday()
+
+    fun trendCostPerPost(): Double = trendService.costPerPost()
+
+    fun trendCostMeasured(): Boolean = trendService.costPerPostIsMeasured()
+
+    fun trendPayer(): String = trendService.payerText()
+
+    /** What a Full analysis would buy at the typed budget; null when the budget is missing, out of range or too small. */
+    fun trendPlan(): TrendPlan? {
+        val t = _state.value.trend ?: return null
+        val check = t.check ?: return null
+        return t.budget?.let { b -> trendService.plan(check, b) }
     }
 
-    fun setLookSize(size: DeepLookSize) = _state.update { it.copy(lookSize = size) }
+    /** Opens the panel for [tagline] and shows the last check of it, if there is one. Nothing is asked of X yet. */
+    fun openTrend(tagline: String) {
+        if (!trendService.isConfigured) {
+            _state.update { it.copy(error = "Trend check needs the X app keys (RW, Main or DK) in local.properties.", message = null) }
+            return
+        }
+        val saved = trendStore.forTagline(tagline).firstOrNull()
+        _state.update {
+            it.copy(trend = TrendUi(tagline, check = saved, range = saved?.let { c -> TrendRange(c.startMs, c.endMs, c.ended) }), error = null, message = null)
+        }
+    }
 
-    /** Why the chosen size cannot run today, or null. */
-    fun lookSizeBlocked(): String? = deepLook.blockedReason(_state.value.lookSize)
+    fun closeTrend() = _state.update { if (it.trend?.busy != null) it else it.copy(trend = null) }
 
-    fun cancelDeepLook() = _state.update { it.copy(confirmDeepLook = null) }
+    private fun editTrend(f: (TrendUi) -> TrendUi) = _state.update { st -> st.trend?.let { st.copy(trend = f(it)) } ?: st }
 
-    /** Grok reads a sample of this tagline's posts (xAI's X search). Read only; the X API keys are not used. */
-    fun confirmDeepLook() {
-        val s = _state.value
-        val tagline = s.confirmDeepLook ?: return
-        val report = s.report ?: return
-        _state.update { it.copy(confirmDeepLook = null, deepLooking = tagline, error = null, message = null) }
+    /** One counts call (about $0.005): finds when the trend started and ended in the last 7 days. */
+    fun trendDetect() {
+        val t = _state.value.trend ?: return
+        if (t.busy != null) return
+        editTrend { it.copy(busy = "Finding when the trend ran…", error = null, notice = null) }
         viewModelScope.launch {
             try {
-                // Earlier looks at this tagline go along, so Grok reads fresh posts and says what changed.
-                val look = deepLook.look(tagline, report, previous = deepLookStore.history(tagline), size = s.lookSize)
-                deepLookStore.addLook(look) // always kept, even if a new count arrived meanwhile
-                if (_state.value.report?.fetchedAtMs == report.fetchedAtMs) {
-                    _state.update { it.copy(deepLooking = null, deepLooks = it.deepLooks + (tagline to look)) }
-                    refreshHistory()
-                    publishTrend() // the same run again, now with this Deep look
-                } else {
-                    _state.update { it.copy(deepLooking = null) }
-                    refreshHistory()
+                val d: Detected = trendService.detect(t.tagline)
+                editTrend {
+                    if (d.range == null) {
+                        it.copy(busy = null, error = "No clear trend for \"${t.tagline}\" in the last 7 days (it never reached 5 tweets an hour).")
+                    } else {
+                        it.copy(busy = null, range = d.range, check = it.check?.takeIf { c -> c.startMs == d.range.startMs }, notice = "Range found. Check it, then count the exact numbers.")
+                    }
                 }
             } catch (e: CancellationException) {
                 throw e
-            } catch (e: Exception) {
-                _state.update { it.copy(deepLooking = null, error = "Deep look failed: ${e.message}") }
+            } catch (e: TrendCheckException) {
+                editTrend { it.copy(busy = null, error = e.message) }
+            }
+        }
+    }
+
+    /** Moves the start or the end of the range by whole hours (the range is only ever whole hours). */
+    fun trendShift(startHours: Int, endHours: Int) = editTrend { t ->
+        val r = t.range ?: return@editTrend t
+        val now = System.currentTimeMillis()
+        val start = r.startMs + startHours * HOUR_MS
+        val end = (r.endMs + endHours * HOUR_MS).coerceAtMost(now)
+        if (end - start < HOUR_MS || now - start > 7 * 24 * HOUR_MS - 2 * HOUR_MS) t
+        else t.copy(range = TrendRange(start, end, r.ended), check = t.check?.takeIf { it.startMs == start })
+    }
+
+    fun trendSetBudget(text: String) = editTrend { it.copy(budgetText = text.filter { c -> c.isDigit() || c == '.' }.take(5), error = null) }
+
+    /** Four counts calls (about $0.02) for the chosen range: the exact retweet, reply and quote shares, launch and waves. */
+    fun trendLive() {
+        val t = _state.value.trend ?: return
+        val range = t.range ?: return
+        if (t.busy != null) return
+        editTrend { it.copy(busy = "Counting the trend…", error = null, notice = null) }
+        viewModelScope.launch {
+            try {
+                val c = trendService.live(t.tagline, range)
+                refreshChecks()
+                editTrend { it.copy(busy = null, check = c, notice = "Exact numbers updated.") }
+                publishTrend()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: TrendCheckException) {
+                editTrend { it.copy(busy = null, error = e.message) }
+            }
+        }
+    }
+
+    /** Reads the planned posts inside the typed budget, then works out the sample figures and sentiment. */
+    fun trendFull() {
+        val t = _state.value.trend ?: return
+        val check = t.check ?: return
+        val budget = t.budget ?: return
+        if (t.busy != null) return
+        editTrend { it.copy(busy = "Reading posts and judging them… this can take a minute", error = null, notice = null) }
+        viewModelScope.launch {
+            try {
+                val c = trendService.full(check, budget)
+                refreshChecks()
+                editTrend { it.copy(busy = null, check = c, notice = "Done. X charged ${usdText(c.costUsd ?: 0.0)} in total for this trend.") }
+                publishTrend()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: TrendCheckException) {
+                // Whatever was bought is kept even when a step failed.
+                val kept = trendStore.find(check.tagline, check.startMs)
+                refreshChecks()
+                editTrend { it.copy(busy = null, check = kept ?: it.check, error = e.message) }
             }
         }
     }
 
     /**
-     * Sends the current run with every AI result it has right now (none, a read-out, Deep looks on some taglines, or all).
-     * Called after the count and again after each read-out or Deep look for the same count; the website updates that run.
+     * Sends the current run with every AI result it has right now (none, a read-out, Trend checks on some taglines, or all).
+     * Called after the count and again after each read-out or Trend check for the same count; the website updates that run.
      * A send still on its way is replaced by the newer, fuller one, and Retry always resends the fullest.
      */
     private fun publishTrend() {
         val s = _state.value
         val report = s.report ?: return
         try {
-            publisher.publish(trendPayload(report, ZoneId.systemDefault(), s.analysis, s.deepLooks, s.regulars))
+            publisher.publish(trendPayload(report, ZoneId.systemDefault(), s.analysis, s.checks))
         } catch (e: PayloadException) {
             publisher.reject(MeterKind.TREND, e.message ?: "The website cannot take this result.")
         }

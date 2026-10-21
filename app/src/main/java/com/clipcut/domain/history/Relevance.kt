@@ -1,6 +1,7 @@
 package com.clipcut.domain.history
 
 import com.clipcut.domain.taglines.HOUR_MS
+import com.clipcut.domain.taglines.TrendCheckResult
 import java.time.DayOfWeek
 import java.time.Instant
 import java.time.ZoneId
@@ -42,19 +43,35 @@ data class ContestantWeek(
     val bestTrending: Int?,
     /** Instagram comments (all of them, replies too) that mention them this week by hashtag, @handle or name; null: Instagram not included. */
     val igMentions: Long? = null,
+    /**
+     * Tagline tweets this week that look natural (tweets x the natural share of the Trend check made for that tagline), or
+     * null when none of their taglines had a Trend check with a sample. Missing is not zero.
+     */
+    val naturalTweets: Long? = null,
+    /** How the sampled posts about them felt, from -1 (all negative) to +1 (all positive), and how many posts it rests on; null: too few. */
+    val mood: Double? = null,
+    val moodPosts: Int = 0,
 )
 
 /** How much each fact weighs in the score. Each fact is scored against the week's best contestant for it (0 to 1). */
 val RELEVANCE_WEIGHTS = linkedMapOf(
-    "Tagline tweets" to 0.20,
-    "Original tweets" to 0.12,
+    "Tagline tweets" to 0.15,
+    "Original tweets" to 0.08,
     "Tagline wins" to 0.08,
-    "Peak hour" to 0.05,
-    "Boss Meter share" to 0.22,
+    "Peak hour" to 0.04,
+    "Boss Meter share" to 0.20,
     "Boss Meter wins" to 0.08,
     "Trending" to 0.10,
-    "Instagram mentions" to 0.15,
+    "Instagram mentions" to 0.12,
+    "Natural support" to 0.10,
+    "Positive mood" to 0.05,
 )
+
+/** Facts that only exist for contestants whose taglines had a Trend check. Without one, a contestant is scored on the rest, not given 0. */
+private val CHECK_FACTS = setOf("Natural support", "Positive mood")
+
+/** At least this many sampled posts about a contestant before their mood counts. */
+const val MIN_MOOD_POSTS = 8
 
 /** A contestant's score (0 to 100) with the facts that justify it. */
 data class Relevance(val week: ContestantWeek, val score: Int, val parts: Map<String, Double>) {
@@ -66,6 +83,8 @@ data class Relevance(val week: ContestantWeek, val score: Int, val parts: Map<St
             week.bossShare?.let { "${"%.0f".format(it)}% Boss Meter votes" },
             if (week.bossWins > 0) "${week.bossWins} Boss Meter ${if (week.bossWins == 1) "win" else "wins"}" else null,
             week.igMentions?.takeIf { it > 0 }?.let { "${short(it)} Instagram mentions" },
+            week.naturalTweets?.takeIf { week.tweets > 0 }?.let { "~${(100.0 * it / week.tweets).roundToInt().coerceIn(0, 100)}% natural" },
+            week.mood?.let { "mood ${if (it >= 0) "+" else ""}${(it * 100).roundToInt()}" },
             week.bestTrending?.let { "best #$it Trending" },
         ).joinToString(" · ").take(200)
 }
@@ -88,6 +107,8 @@ fun weekStats(
     untilMs: Long,
     /** Instagram comments mentioning each contestant (display name to count), when the Instagram side is included. */
     igMentions: Map<String, Long>? = null,
+    /** Trend checks made in the week (any of them): their natural share and the mood of the sampled posts feed the score. */
+    checks: List<TrendCheckResult> = emptyList(),
 ): List<ContestantWeek> {
     // Tagline counts: one value per tagline per hour, from the newest count that covered that hour.
     data class Hour(val all: Long, val originals: Long, val fetched: Long)
@@ -166,6 +187,26 @@ fun weekStats(
         }
     }
 
+    // Trend checks: natural tweets per contestant, and how the sampled posts about each contestant felt.
+    val natural = HashMap<String, Long>()
+    val moodPos = HashMap<String, Int>()
+    val moodNeg = HashMap<String, Int>()
+    val moodAll = HashMap<String, Int>()
+    for (c in checks.filter { it.atMs in sinceMs until untilMs }) {
+        val st = c.stats
+        val owner = contestantOf(c.tagline)
+        if (st != null && owner != null) {
+            natural[owner.lowercase()] = (natural[owner.lowercase()] ?: 0) + Math.round(c.shares.all * st.naturalPct / 100.0)
+            display.putIfAbsent(owner.lowercase(), owner)
+        }
+        c.sentiment?.byContestant?.forEach { (who, t) ->
+            val k = who.lowercase()
+            moodPos[k] = (moodPos[k] ?: 0) + t.first
+            moodNeg[k] = (moodNeg[k] ?: 0) + t.second
+            moodAll[k] = (moodAll[k] ?: 0) + t.first + t.second + t.third
+        }
+    }
+
     return display.map { (id, name) ->
         ContestantWeek(
             name = name,
@@ -179,6 +220,9 @@ fun weekStats(
             bossWins = bossWins[id] ?: 0,
             bestTrending = trending[id],
             igMentions = igMentions?.let { ig[id] ?: 0L },
+            naturalTweets = natural[id],
+            mood = moodAll[id]?.takeIf { it >= MIN_MOOD_POSTS }?.let { n -> ((moodPos[id] ?: 0) - (moodNeg[id] ?: 0)).toDouble() / n },
+            moodPosts = moodAll[id] ?: 0,
         )
     }
 }
@@ -190,7 +234,8 @@ fun weekStats(
  */
 fun relevance(weeks: List<ContestantWeek>): List<Relevance> {
     fun ratio(v: Double, best: Double) = if (best <= 0.0) 0.0 else v / best
-    val values: Map<String, (ContestantWeek) -> Double> = mapOf(
+    // A null value means "not measured for this contestant" (only the Trend check facts can be null).
+    val values: Map<String, (ContestantWeek) -> Double?> = mapOf(
         "Tagline tweets" to { w -> w.tweets.toDouble() },
         "Original tweets" to { w -> w.originals.toDouble() },
         "Tagline wins" to { w -> w.taglineWins.toDouble() },
@@ -200,12 +245,17 @@ fun relevance(weeks: List<ContestantWeek>): List<Relevance> {
         // Trending #1 scores 1.0, #50 about 0.02; none scores 0.
         "Trending" to { w -> w.bestTrending?.let { (51.0 - it.coerceIn(1, 50)) / 50.0 } ?: 0.0 },
         "Instagram mentions" to { w -> (w.igMentions ?: 0L).toDouble() },
+        "Natural support" to { w -> w.naturalTweets?.toDouble() },
+        // -1..+1 mapped to 0..1, so an all-negative contestant scores 0 and an all-positive one 1.
+        "Positive mood" to { w -> w.mood?.let { (it + 1.0) / 2.0 } },
     )
-    val best = values.mapValues { (_, f) -> weeks.maxOfOrNull(f) ?: 0.0 }
+    val best = values.mapValues { (_, f) -> weeks.maxOfOrNull { w -> f(w) ?: 0.0 } ?: 0.0 }
     val used = RELEVANCE_WEIGHTS.filterKeys { (best[it] ?: 0.0) > 0.0 }
-    val totalWeight = used.values.sum()
     return weeks.map { w ->
-        val parts = used.mapValues { (k, weight) -> 100.0 * weight / totalWeight * ratio(values.getValue(k)(w), best.getValue(k)) }
+        // Each contestant's weights are scaled to fill 0 to 100 over the facts that were measured for them.
+        val mine = used.filterKeys { k -> k !in CHECK_FACTS || values.getValue(k)(w) != null }
+        val totalWeight = mine.values.sum()
+        val parts = mine.mapValues { (k, weight) -> 100.0 * weight / totalWeight * ratio(values.getValue(k)(w) ?: 0.0, best.getValue(k)) }
         Relevance(w, parts.values.sum().roundToInt().coerceIn(0, 100), parts)
     }.sortedWith(compareByDescending<Relevance> { it.score }.thenBy { it.week.name.lowercase() })
 }

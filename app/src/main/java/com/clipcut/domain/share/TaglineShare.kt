@@ -1,7 +1,8 @@
 package com.clipcut.domain.share
 
 import com.clipcut.domain.taglines.CountReport
-import com.clipcut.domain.taglines.DeepLook
+import com.clipcut.domain.taglines.TrendCheckResult
+import com.clipcut.domain.taglines.trendCheckLines
 import com.clipcut.domain.taglines.TaglineAnalysis
 import com.clipcut.domain.taglines.GridException
 import com.clipcut.domain.taglines.HOUR_MS
@@ -254,17 +255,17 @@ fun taglineShareCard(
     dateText: String,
     zone: ZoneId,
     positions: Map<String, Int> = emptyMap(),
-    looks: Map<String, DeepLook> = emptyMap(),
+    checks: Map<String, TrendCheckResult> = emptyMap(),
     readout: TaglineAnalysis? = null,
     stage: ShareStage = ShareStage.LIVE,
     longPost: Boolean = false,
 ): TaglineShareCard {
     var stats = r.counts.mapIndexed { i, c ->
-        val look = looks[c.tagline]
+        val check = checks[c.tagline]
+        // Accounts found by a Trend check are never tagged in a public post, so no voices go along.
         taglineStat(r, c, i, positions[c.tagline]).copy(
-            themes = look?.themes?.take(3).orEmpty(),
-            voices = look?.voices?.take(5)?.map { it.handle }.orEmpty(),
-            samplePosts = look?.postsRead,
+            themes = check?.let(::trendCheckLines).orEmpty(),
+            samplePosts = check?.stats?.sample,
         )
     }
     val compares = stats.size >= 2
@@ -291,7 +292,7 @@ fun taglineShareCard(
     }
     val combined = r.combinedAll
 
-    val aiLabels = listOfNotNull(readout?.label) + looks.values.map { it.label }
+    val aiLabels = listOfNotNull(readout?.label) + checks.values.mapNotNull { it.sentiment?.label }
     val caption = taglineCaption(stats, combined, stage, dateText, readout, aiLabels, longPost)
     return TaglineShareCard(
         title = "TAGLINE COUNTER",
@@ -305,7 +306,7 @@ fun taglineShareCard(
         ).joinToString("  ·  "),
         caption = caption,
         readout = readout?.let { listOf(it.headline) + it.insights.take(3) }.orEmpty(),
-        aiNote = listOfNotNull(readout?.label, looks.values.firstOrNull()?.label).distinct().takeIf { it.isNotEmpty() }
+        aiNote = listOfNotNull(readout?.label, checks.values.firstNotNullOfOrNull { it.sentiment?.label }).distinct().takeIf { it.isNotEmpty() }
             ?.let { "AI notes by ${it.joinToString(", ")}: from the counts and a sample of posts; check before relying on them" },
     )
 }

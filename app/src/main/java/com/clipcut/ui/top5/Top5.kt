@@ -41,6 +41,7 @@ import com.clipcut.domain.history.contestantKey
 import com.clipcut.domain.history.relevance
 import com.clipcut.domain.history.weekStart
 import com.clipcut.domain.history.weekStats
+import com.clipcut.domain.taglines.TrendCheckStore
 import com.clipcut.domain.publish.MeterKind
 import com.clipcut.domain.publish.PayloadException
 import com.clipcut.domain.publish.PublishStatus
@@ -93,6 +94,7 @@ class Top5ViewModel @Inject constructor(
     private val contestants: ContestantStore,
     private val instagram: IgBossApi,
     private val bossStore: BossMeterStore,
+    private val trendChecks: TrendCheckStore,
 ) : ViewModel() {
     private val _state = MutableStateFlow(Top5UiState())
     val state: StateFlow<Top5UiState> = _state.asStateFlow()
@@ -115,7 +117,7 @@ class Top5ViewModel @Inject constructor(
         val zone = ZoneId.systemDefault()
         val from = weekStart(now, zone)
         val links = contestants.snapshot()
-        val scores = relevance(weekStats(history, { text -> links[contestantKey(text)] ?: contestants.resolve(text) }, from, now, _state.value.igMentions))
+        val scores = relevance(weekStats(history, { text -> links[contestantKey(text)] ?: contestants.resolve(text) }, from, now, _state.value.igMentions, trendChecks.all()))
         _state.update { it.copy(scores = scores, weekFromMs = from, week = weekLabel(from, zone), error = null) }
     }
 

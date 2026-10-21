@@ -5,9 +5,8 @@ import com.clipcut.domain.bossmeter.BossMeterStore
 import com.clipcut.domain.bossmeter.overall
 import com.clipcut.domain.bossmeter.shortcodeFrom
 import com.clipcut.domain.history.RunHistory
-import com.clipcut.domain.taglines.DeepLookStore
+import com.clipcut.domain.taglines.TrendCheckStore
 import com.clipcut.domain.taglines.TaglineStore
-import com.clipcut.domain.taglines.regulars
 import java.time.ZoneId
 import javax.inject.Inject
 
@@ -19,22 +18,21 @@ sealed interface SyncResult {
 
 /**
  * Re-sends what the app already holds to the website, without counting anything on X (no X calls, no cost). The latest
- * Tagline Counter run goes with whatever AI read-out and Deep looks exist for it now; the latest Boss Meter run goes with
+ * Tagline Counter run goes with whatever AI read-out and Trend checks exist for it now; the latest Boss Meter run goes with
  * its stage, final flag and insights. Both use the run's own timestamp, so the website updates that run in place.
  */
 class WebsiteSync @Inject constructor(
     private val taglines: TaglineStore,
-    private val deepLooks: DeepLookStore,
+    private val trendChecks: TrendCheckStore,
     private val history: RunHistory,
     private val boss: BossMeterStore,
     private val publisher: WebsitePublisher,
 ) {
     fun sendTagline(): SyncResult {
         val report = taglines.lastReport() ?: return SyncResult.Nothing("No Tagline Counter run yet. Count first.")
-        val looks = deepLooks.looksFor(report.fetchedAtMs)
-        val steady = deepLooks.allLooks().groupBy { it.tagline }.mapValues { regulars(it.value) }
+        val checks = report.counts.mapNotNull { c -> trendChecks.forTagline(c.tagline).firstOrNull()?.let { c.tagline to it } }.toMap()
         return try {
-            publisher.publish(trendPayload(report, ZoneId.systemDefault(), deepLooks.readoutFor(report.fetchedAtMs), looks, steady))
+            publisher.publish(trendPayload(report, ZoneId.systemDefault(), trendChecks.readoutFor(report.fetchedAtMs), checks))
             SyncResult.Queued
         } catch (e: PayloadException) {
             val why = e.message ?: "The website cannot take this result."

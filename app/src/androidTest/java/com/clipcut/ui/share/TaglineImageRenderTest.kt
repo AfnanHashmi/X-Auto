@@ -56,18 +56,17 @@ class TaglineImageRenderTest {
         ))
         save("three.png", TaglineImage.render(taglineShareCard(three, "17 Oct 2026, 2:04 PM", zone, mapOf("QAZI RISING ABOVE HATE" to 4)), zone))
 
-        val look = com.clipcut.domain.taglines.DeepLook(
-            "STOP NEGATIVE PR AGAINST QAZI", 18,
-            listOf("Qazi as unstoppable dominant force in BB20", "Fan defence against external hate and religious targeting", "Real fan power driving trends over PR"),
-            listOf("@fan_account_one", "@example_account", "@fan_account_three", "@_kudi_kashmiri").map { com.clipcut.domain.taglines.Voice(it, "") },
-            emptyList(), 0.105, "xAI · grok-4.3", 0L,
+        val check = com.clipcut.domain.taglines.TrendCheckResult(
+            "STOP NEGATIVE PR AGAINST QAZI", start, end, true, end,
+            com.clipcut.domain.taglines.CountShares(1000, 100, 20, 10), emptyList(), com.clipcut.domain.taglines.LaunchType.SUDDEN, emptyList(),
+            stats = com.clipcut.domain.taglines.SampleStats(200, 90, 38, 22, 41, 17, 30, 12, 25, 0, 70, emptyList(), emptyList(), emptyList(), emptyList(), null, 10),
         )
         val readout = com.clipcut.domain.taglines.TaglineAnalysis(
             "Qazi tagline leads with 81,727 tweets (58% share)",
             listOf("Qazi leads #2 by 21,793 tweets; 58% vs 42% vs 0% split", "Qazi most retweet-driven: 88% RTs (7.3 per original) vs 88%", "Qazi peaked hardest: 30,000 tweets in one hour (500/min) vs 22,000", "extra"),
             "Fading", "Angle", "xAI · grok-4.3", 0.004,
         )
-        save("three_ai.png", TaglineImage.render(taglineShareCard(three, "17 Oct 2026, 2:04 PM", zone, mapOf("QAZI RISING ABOVE HATE" to 4), looks = mapOf(look.tagline to look), readout = readout), zone))
+        save("three_ai.png", TaglineImage.render(taglineShareCard(three, "17 Oct 2026, 2:04 PM", zone, mapOf("QAZI RISING ABOVE HATE" to 4), checks = mapOf(check.tagline to check), readout = readout), zone))
 
         val ten = CountReport(start, end, fetched, (1..10).map { tagline("A VERY LONG TAGLINE NUMBER $it FOR THE SHOW THAT KEEPS ON GOING AND GOING", 2 + it * 2, 50L * it) })
         val bmp = TaglineImage.render(taglineShareCard(ten, "17 Oct 2026, 2:04 PM", zone, mapOf(ten.counts[3].tagline to 1)), zone)

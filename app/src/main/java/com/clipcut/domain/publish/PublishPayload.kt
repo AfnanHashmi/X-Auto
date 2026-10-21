@@ -8,7 +8,7 @@ import com.clipcut.domain.taglines.GridException
 import com.clipcut.domain.taglines.HOUR_MS
 import com.clipcut.domain.taglines.hourlyGrid
 import com.clipcut.domain.taglines.insightLines
-import com.clipcut.domain.taglines.DeepLook
+import com.clipcut.domain.taglines.TrendCheckResult
 import com.clipcut.domain.taglines.TaglineAnalysis
 import com.clipcut.domain.share.taglineStat
 import java.time.ZoneId
@@ -247,7 +247,7 @@ fun bossItemInsights(r: BossMeterResult, index: Int): List<String> {
  * row for is 0; a bucket that starts part-way into an hour is counted in that hour. A bucket that falls outside the grid is an error, never dropped.
  */
 /**
- * The Tagline Counter run. [readout] and [looks] are whatever AI results exist for this run at the moment of sending; the
+ * The Tagline Counter run. [readout] and [checks] are whatever AI results exist for this run at the moment of sending; the
  * same run (same refreshedAt) is sent again each time one is added, and the website updates that run in place. Anything
  * not there yet is simply left out: never null, never an empty object or array.
  */
@@ -255,8 +255,7 @@ fun trendPayload(
     report: CountReport,
     zone: ZoneId? = null,
     readout: TaglineAnalysis? = null,
-    looks: Map<String, DeepLook> = emptyMap(),
-    steadyVoices: Map<String, List<Pair<String, Int>>> = emptyMap(),
+    checks: Map<String, TrendCheckResult> = emptyMap(),
 ): PublishPayload {
     val grid = try {
         hourlyGrid(report)
@@ -277,7 +276,7 @@ fun trendPayload(
     readout?.let(::readoutJson)?.let { body.put("readout", it) }
     val itemsArray = itemsJson(items)
     report.counts.forEachIndexed { i, t ->
-        looks[t.tagline]?.let { deepLookJson(it, steadyVoices[t.tagline].orEmpty()) }?.let { itemsArray.getJSONObject(i).put("deepLook", it) }
+        checks[t.tagline]?.let { itemsArray.getJSONObject(i).put("trendCheck", trendCheckJson(it)) }
     }
     body.put("items", itemsArray)
     return PublishPayload(MeterKind.TREND, body.toString())
@@ -357,29 +356,31 @@ fun readoutJson(a: TaglineAnalysis): JSONObject? {
 }
 
 /**
- * One tagline's Deep look: themes, the top voices with what Grok saw, posts to open, what changed since earlier looks,
- * the accounts that keep coming up across looks, how many posts were read, by which model and when. Handles and links
- * that do not look real are dropped. Null when it has no themes left.
+ * One tagline's Trend check: the range, the exact shares from counts, and (after a Full analysis) the sample figures. Sample
+ * figures are estimates and always go with the number of posts read. Accounts are only ever @handles that look real.
  */
-fun deepLookJson(d: DeepLook, steady: List<Pair<String, Int>> = emptyList()): JSONObject? {
-    val themes = cleanInsights(d.themes)?.take(MAX_THEMES) ?: return null
-    val o = JSONObject().put("themes", JSONArray(themes))
-    d.voices.filter { HANDLE.matches(it.handle) }.take(MAX_VOICES).takeIf { it.isNotEmpty() }?.let { vs ->
-        o.put("voices", JSONArray(vs.map { v -> JSONObject().put("handle", v.handle).apply { line(v.why)?.let { put("note", it) } } }))
+fun trendCheckJson(c: TrendCheckResult): JSONObject {
+    val o = JSONObject().put("rangeStart", isoUtc(c.startMs)).put("rangeEnd", isoUtc(c.endMs)).put("ended", c.ended).put("checkedAt", isoUtc(c.atMs))
+    o.put("retweetPct", c.shares.retweetPct).put("replyPct", c.shares.replyPct).put("quotePct", c.shares.quotePct).put("originalPct", c.shares.originalPct)
+    c.launch?.let { o.put("launch", it.name.lowercase()).put("launchText", it.label) }
+    if (c.waves.isNotEmpty()) o.put("waves", JSONArray(c.waves.map { isoUtc(it) }))
+    c.stats?.let { s ->
+        o.put("sample", s.sample).put("naturalPct", s.naturalPct).put("botLikePct", s.botLikePct).put("copyPastePct", s.copyPastePct)
+        o.put("newAccountPct", s.newAccountPct).put("lowReachPct", s.lowReachPct).put("fanClubPct", s.fanClubPct)
+        o.put("top10AuthorsPct", s.top10AuthorsPct).put("medianLikes", s.medianLikes).put("zeroLikePct", s.zeroLikePct)
+        s.organizers.filter { HANDLE.matches(it.first) }.takeIf { it.isNotEmpty() }?.let { l ->
+            o.put("organizers", JSONArray(l.map { JSONObject().put("handle", it.first).put("retweets", it.second) }))
+        }
+        s.pairedHashtags.filter { HASHTAG_OUT.matches(it.first) }.takeIf { it.isNotEmpty() }?.let { l -> o.put("pairedHashtags", JSONArray(l.map { it.first })) }
+        s.indiaPctOfLocated?.let { o.put("indiaPctOfLocated", it) }
     }
-    d.examplePosts.filter { X_POST.matches(it) }.take(MAX_LOOK_POSTS).takeIf { it.isNotEmpty() }?.let { o.put("posts", JSONArray(it)) }
-    line(d.changes)?.let { o.put("changes", it) }
-    steady.filter { HANDLE.matches(it.first) && it.second >= 2 }.take(MAX_VOICES).takeIf { it.isNotEmpty() }?.let { st ->
-        o.put("steadyVoices", JSONArray(st.map { (h, n) -> JSONObject().put("handle", h).put("looks", n) }))
+    c.sentiment?.takeIf { it.total > 0 }?.let { m ->
+        o.put(
+            "sentiment",
+            JSONObject().put("positive", m.positive).put("negative", m.negative).put("neutral", m.neutral).put("judged", m.judged)
+                .put("byContestant", JSONObject(m.byContestant.mapValues { JSONArray().put(it.value.first).put(it.value.second).put(it.value.third) })),
+        )
+        providerAndModel(m.label)?.let { (p, md) -> o.put("provider", p).put("model", md) }
     }
-    d.starters.filter { HANDLE.matches(it.handle) }.take(3).takeIf { it.isNotEmpty() }?.let { st ->
-        o.put("starters", JSONArray(st.map { v -> JSONObject().put("handle", v.handle).apply { line(v.why)?.let { put("when", it.take(60)) } } }))
-    }
-    cleanInsights(d.rivals.map { it.take(120) })?.let { o.put("rivalTaglines", JSONArray(it)) }
-    d.pairedHashtags.filter { HASHTAG_OUT.matches(it) }.take(8).takeIf { it.isNotEmpty() }?.let { o.put("pairedHashtags", JSONArray(it)) }
-    if (d.size.isNotBlank()) o.put("size", d.size.lowercase())
-    if (d.postsRead > 0) o.put("postsRead", d.postsRead)
-    providerAndModel(d.label)?.let { (p, m) -> o.put("provider", p).put("model", m) }
-    if (d.atMs > 0) o.put("lookedAt", isoUtc(d.atMs))
     return o
 }
