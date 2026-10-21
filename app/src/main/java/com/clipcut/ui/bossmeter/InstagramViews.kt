@@ -114,10 +114,11 @@ fun LazyListScope.instagramView(
                     Text("Asking the Instagram server…", style = MaterialTheme.typography.bodyMedium)
                 }
             } else {
-                Button(onClick = vm::watchInstagram, enabled = state.igConfigured && state.igShortcode != null, modifier = Modifier.fillMaxWidth()) { Text("Watch this post") }
-                OutlinedButton(onClick = vm::refreshInstagram, enabled = state.canAskInstagram, modifier = Modifier.fillMaxWidth()) { Text("↻ Refresh Instagram numbers") }
+                OutlinedButton(onClick = vm::watchInstagram, enabled = state.igConfigured && state.igShortcode != null, modifier = Modifier.fillMaxWidth()) { Text("Watch this post") }
+                Button(onClick = vm::catchUpInstagram, enabled = state.igConfigured && state.igShortcode != null, modifier = Modifier.fillMaxWidth()) { Text("⬇ Fetch new comments now") }
+                OutlinedButton(onClick = vm::refreshInstagram, enabled = state.canAskInstagram, modifier = Modifier.fillMaxWidth()) { Text("↻ Recount stored comments") }
                 Text(
-                    "Free: the server does the counting and X is not called. Counting on the X tab also refreshes this, up to the same moment.",
+                    "Nothing is fetched from Instagram until you tap \"Fetch new comments now\". Counting and recounting use only the comments already stored, so tap it first for current numbers. Free: X is not called.",
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )

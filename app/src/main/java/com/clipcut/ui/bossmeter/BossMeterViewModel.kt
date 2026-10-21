@@ -223,7 +223,28 @@ class BossMeterViewModel @Inject constructor(
         }
     }
 
-    /** The Instagram numbers as they are now (everything fetched so far). Free: the server counts, X is not called. */
+    /**
+     * The only thing that makes the server fetch new comments from Instagram (it is in manual mode and idle otherwise).
+     * Waits until the server has caught up, then recounts. Free: X is not called.
+     */
+    fun catchUpInstagram() {
+        val s = _state.value
+        val code = s.igShortcode
+        if (!s.igConfigured || code == null || s.igBusy) return
+        _state.update { it.copy(igBusy = true, igError = null, igMessage = "Fetching new Instagram comments… a few minutes after a long gap") }
+        viewModelScope.launch {
+            try {
+                instagram.catchUp(code)
+                _state.update { it.copy(igBusy = false, igMessage = "Caught up with Instagram.") }
+                refreshWatch()
+                if (s.hashtags.isNotEmpty()) fetchInstagram(null)
+            } catch (e: IgException) {
+                _state.update { it.copy(igBusy = false, igError = e.message) }
+            }
+        }
+    }
+
+    /** The Instagram numbers from the comments stored so far (does not fetch new ones; use [catchUpInstagram] for that). Free. */
     fun refreshInstagram() = fetchInstagram(null)
 
     /**
@@ -237,9 +258,6 @@ class BossMeterViewModel @Inject constructor(
         _state.update { it.copy(igBusy = true, igError = null, igMessage = null) }
         viewModelScope.launch {
             try {
-                _state.update { it.copy(igMessage = "Catching up on new Instagram comments…") }
-                instagram.catchUp(code)
-                _state.update { it.copy(igMessage = null) }
                 val r = instagram.boss(code, s.hashtags, untilTs, s.excludeHidden)
                 store.igRaw = r.raw
                 store.igFetchedAt = r.fetchedAtMs
