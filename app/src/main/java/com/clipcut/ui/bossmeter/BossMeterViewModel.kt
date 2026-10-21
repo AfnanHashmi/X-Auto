@@ -237,6 +237,9 @@ class BossMeterViewModel @Inject constructor(
         _state.update { it.copy(igBusy = true, igError = null, igMessage = null) }
         viewModelScope.launch {
             try {
+                _state.update { it.copy(igMessage = "Catching up on new Instagram comments…") }
+                instagram.catchUp(code)
+                _state.update { it.copy(igMessage = null) }
                 val r = instagram.boss(code, s.hashtags, untilTs, s.excludeHidden)
                 store.igRaw = r.raw
                 store.igFetchedAt = r.fetchedAtMs
