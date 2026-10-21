@@ -1,19 +1,21 @@
 package com.clipcut.ui.taglines
 
+import android.app.DatePickerDialog
+import android.app.TimePickerDialog
+import android.content.Context
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
@@ -33,6 +35,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import com.clipcut.domain.taglines.DEFAULT_COST_PER_POST_USD
@@ -40,13 +43,16 @@ import com.clipcut.domain.taglines.SampleStats
 import com.clipcut.domain.taglines.Sentiment
 import com.clipcut.domain.taglines.TREND_CHECK_DAILY_CAP_USD
 import com.clipcut.domain.taglines.TREND_MAX_BUDGET_USD
+import com.clipcut.domain.taglines.TREND_LOOKBACK_MS
 import com.clipcut.domain.taglines.TREND_MIN_BUDGET_USD
 import com.clipcut.domain.taglines.TrendCheckResult
 import com.clipcut.domain.taglines.clockText
 import com.clipcut.domain.taglines.dateTimeText
 import com.clipcut.domain.taglines.pct
 import com.clipcut.domain.taglines.usdText
+import java.time.Instant
 import java.time.ZoneId
+import java.time.ZonedDateTime
 
 private val GOOD = Color(0xFF6BBF8A)
 private val BAD = Color(0xFFE07A5F)
@@ -79,12 +85,45 @@ fun TrendCheckSummary(check: TrendCheckResult, zone: ZoneId) {
     }
 }
 
-@OptIn(ExperimentalLayoutApi::class)
+/** Android's date picker, then its time picker, in the phone's time zone. Dates are limited to what X keeps (the last 7 days). */
+private fun pickDateTime(context: Context, initialMs: Long, zone: ZoneId, onPicked: (Long) -> Unit) {
+    val now = System.currentTimeMillis()
+    val init = Instant.ofEpochMilli(initialMs.coerceIn(now - TREND_LOOKBACK_MS + 60_000L, now)).atZone(zone)
+    val dates = DatePickerDialog(context, { _, y, m, d ->
+        TimePickerDialog(context, { _, h, min ->
+            onPicked(ZonedDateTime.of(y, m + 1, d, h, min, 0, 0, zone).toInstant().toEpochMilli())
+        }, init.hour, init.minute, false).show()
+    }, init.year, init.monthValue - 1, init.dayOfMonth)
+    dates.datePicker.minDate = now - TREND_LOOKBACK_MS
+    dates.datePicker.maxDate = now
+    dates.show()
+}
+
+/** One end of the range: its label and a button showing the chosen date and time (or "Pick"). */
+@Composable
+private fun RangeField(label: String, ms: Long?, zone: ZoneId, enabled: Boolean, onPick: () -> Unit) {
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
+        Text(label, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.width(44.dp))
+        OutlinedButton(onClick = onPick, enabled = enabled, modifier = Modifier.weight(1f)) {
+            Text(ms?.let { dateTimeText(it, zone) } ?: "Pick date and time")
+        }
+    }
+}
+
+/**
+ * The Trend check panel. The user sets the time range and the budget; Run counts that range and then reads posts inside the
+ * budget. "Suggest a range" is optional help that only fills the two fields.
+ */
 @Composable
 fun TrendCheckDialog(vm: TaglinesViewModel, ui: TrendUi, zone: ZoneId, onOpen: (String) -> Unit) {
+    val context = LocalContext.current
     val busy = ui.busy != null
     val check = ui.check
-    val range = ui.range
+    val now = System.currentTimeMillis()
+    val rangeProblem = vm.trendRangeProblem(ui, now)
+    val budgetProblem = vm.trendBudgetProblem(ui)
+    val plan = vm.trendPlan()
+    val perPost = vm.trendCostPerPost()
     AlertDialog(
         onDismissRequest = vm::closeTrend,
         title = { Text("Trend check: ${ui.tagline}") },
@@ -99,43 +138,76 @@ fun TrendCheckDialog(vm: TaglinesViewModel, ui: TrendUi, zone: ZoneId, onOpen: (
                 ui.error?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyMedium) }
                 ui.notice?.let { Text(it, color = GOOD, style = MaterialTheme.typography.bodyMedium) }
 
-                // 1. When the trend ran
-                Text("1. When did it run?", style = MaterialTheme.typography.titleSmall)
-                if (range == null) {
-                    Text("X keeps the last 7 days. One count (about $0.005) finds when this tagline started and when it died down, so you do not have to guess.", style = MaterialTheme.typography.bodySmall)
-                } else {
-                    Text(
-                        "${dateTimeText(range.startMs, zone)}  to  ${dateTimeText(range.endMs, zone)}" + if (range.ended) "  (ended)" else "  (still running)",
-                        style = MaterialTheme.typography.bodyMedium,
-                    )
-                    FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                        OutlinedButton(onClick = { vm.trendShift(-1, 0) }, enabled = !busy) { Text("Start −1h") }
-                        OutlinedButton(onClick = { vm.trendShift(1, 0) }, enabled = !busy) { Text("Start +1h") }
-                        OutlinedButton(onClick = { vm.trendShift(0, -1) }, enabled = !busy) { Text("End −1h") }
-                        OutlinedButton(onClick = { vm.trendShift(0, 1) }, enabled = !busy) { Text("End +1h") }
-                    }
+                // 1. The time range: the user's
+                Text("1. Time range", style = MaterialTheme.typography.titleSmall)
+                Text("When to look. Any time in the last 7 days (that is all X keeps).", style = MaterialTheme.typography.bodySmall)
+                RangeField("From", ui.startMs, zone, !busy) { pickDateTime(context, ui.startMs ?: (now - 6 * 3_600_000L), zone, vm::trendSetStart) }
+                RangeField("To", ui.endMs, zone, !busy) { pickDateTime(context, ui.endMs ?: now, zone, vm::trendSetEnd) }
+                if (ui.startMs != null || ui.endMs != null) {
+                    rangeProblem?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }
                 }
-                OutlinedButton(onClick = vm::trendDetect, enabled = !busy, modifier = Modifier.fillMaxWidth()) {
-                    Text(if (range == null) "Find the trend range (about $0.005)" else "Find it again (about $0.005)")
-                }
+                TextButton(onClick = vm::trendSuggest, enabled = !busy) { Text("Not sure? Suggest a range from the counts (about $0.005)") }
 
-                // 2. The exact numbers
-                if (range != null) {
-                    Text("2. Exact numbers", style = MaterialTheme.typography.titleSmall)
-                    Text(
-                        "Four count calls (about $0.02) for this range. Free of any guessing; refresh as often as you like while it runs.",
+                // 2. The budget: the user's
+                Text("2. Budget", style = MaterialTheme.typography.titleSmall)
+                OutlinedTextField(
+                    value = ui.budgetText, onValueChange = vm::trendSetBudget, label = { Text("Budget in USD") }, placeholder = { Text("for example 0.50") },
+                    singleLine = true, enabled = !busy,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal), modifier = Modifier.fillMaxWidth(),
+                    supportingText = {
+                        Text("${usdText(TREND_MIN_BUDGET_USD)} to ${usdText(TREND_MAX_BUDGET_USD)}. Today: ${usdText(vm.trendSpentToday())} of the ${usdText(TREND_CHECK_DAILY_CAP_USD)} daily limit.")
+                    },
+                )
+                if (ui.budgetText.isNotBlank()) budgetProblem?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }
+                val price = if (vm.trendCostMeasured()) "measured at ${"$"}${"%.4f".format(perPost)} a post" else "assumed ${"$"}${"%.3f".format(DEFAULT_COST_PER_POST_USD)} a post until the first run measures it"
+                val budget = ui.budget
+                when {
+                    budgetProblem != null || budget == null -> Unit
+                    plan != null && plan.slices.isEmpty() -> Text("Every hour of this range has already been read. Pick a different range to read more.", style = MaterialTheme.typography.bodySmall)
+                    plan != null -> Text(
+                        "Plan: up to ${plan.postsPlanned} posts in ${plan.slices.size} search${if (plan.slices.size == 1) "" else "es"} across ${plan.hoursCovered.size} busy hour${if (plan.hoursCovered.size == 1) "" else "s"}, " +
+                            "at most ${usdText(plan.maxUsd)} (price $price).",
                         style = MaterialTheme.typography.bodySmall,
                     )
-                    Button(onClick = vm::trendLive, enabled = !busy, modifier = Modifier.fillMaxWidth()) {
-                        Text(if (check == null) "Count this range (about $0.02)" else "Refresh counts (about $0.02)")
+                    else -> Text(
+                        "Up to ${(budget / perPost).toInt()} posts, at most ${usdText(budget)} (price $price). They are spread over the busy hours of your range, busier hours getting more.",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+                if (rangeProblem == null) {
+                    val end = ui.endMs!!
+                    if (now - end < 10 * 60_000L) {
+                        Text("Your range runs up to now. If the trend is still going, posts after now are not included.", style = MaterialTheme.typography.bodySmall, color = ORGANIZED)
+                    } else if (now - end >= 24 * 3_600_000L) {
+                        Text("This range ended over a day ago. X removes many spam accounts by then, so bot-like figures may read low.", style = MaterialTheme.typography.bodySmall, color = ORGANIZED)
                     }
                 }
+
+                // 3. Run
+                Text(vm.trendPayer(), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                val canRun = !busy && rangeProblem == null && budgetProblem == null && budget != null && (plan == null || plan.slices.isNotEmpty())
+                Button(onClick = vm::trendRun, enabled = canRun, modifier = Modifier.fillMaxWidth()) {
+                    Text(if (budget != null && budgetProblem == null) "Run (up to ${usdText(plan?.maxUsd ?: budget)} + about $0.02 to count)" else "Run")
+                }
+                Text(
+                    "Run counts your range first (about $0.02), then reads posts inside your budget and judges them. Nothing is posted.",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                if (check?.isFull == true) {
+                    Text(
+                        "Last sample for this range: ${check.postsRead} posts" + (check.costUsd?.let { ", X charged ${usdText(it)} in all" } ?: "") + ".",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                if (rangeProblem == null) {
+                    OutlinedButton(onClick = vm::trendLive, enabled = !busy, modifier = Modifier.fillMaxWidth()) { Text("Refresh counts only (about $0.02)") }
+                }
+
+                // Results
                 if (check != null) {
                     ExactSection(check, zone)
-
-                    // 3. The sample
-                    Text("3. Read a sample of the posts", style = MaterialTheme.typography.titleSmall)
-                    FullSection(vm, ui, check, zone)
                     check.stats?.let { StatsSection(it, check, onOpen) }
                     check.sentiment?.takeIf { it.total > 0 }?.let { SentimentSection(it) }
                 }
@@ -175,47 +247,6 @@ private fun ExactSection(c: TrendCheckResult, zone: ZoneId) {
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
-    }
-}
-
-@Composable
-private fun FullSection(vm: TaglinesViewModel, ui: TrendUi, check: TrendCheckResult, zone: ZoneId) {
-    val busy = ui.busy != null
-    val plan = vm.trendPlan()
-    val budget = ui.budget
-    val spent = vm.trendSpentToday()
-    val perPost = vm.trendCostPerPost()
-    val ageH = (System.currentTimeMillis() - check.endMs) / 3_600_000L
-    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        Text(
-            "Reads posts from X spread over the hours of the trend (busier hours get more), then works out how natural or organized it looked and how people felt. " +
-                "It is a sample, so every figure is an estimate. Nothing is posted.",
-            style = MaterialTheme.typography.bodySmall,
-        )
-        OutlinedTextField(
-            value = ui.budgetText, onValueChange = vm::trendSetBudget, label = { Text("Budget (USD)") }, singleLine = true,
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal), modifier = Modifier.fillMaxWidth(),
-            supportingText = { Text("${usdText(TREND_MIN_BUDGET_USD)} to ${usdText(TREND_MAX_BUDGET_USD)}. Today: ${usdText(spent)} of ${usdText(TREND_CHECK_DAILY_CAP_USD)} daily limit.") },
-        )
-        val blocked = budget?.let { b -> if (b < TREND_MIN_BUDGET_USD || b > TREND_MAX_BUDGET_USD) "Budget must be ${usdText(TREND_MIN_BUDGET_USD)} to ${usdText(TREND_MAX_BUDGET_USD)}." else if (spent + b > TREND_CHECK_DAILY_CAP_USD) "That would pass today's limit." else null }
-            ?: "Type a budget."
-        when {
-            blocked != null -> Text(blocked, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
-            plan == null -> Text("That budget cannot buy a single search. Try at least ${usdText(10 * perPost)}.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
-            plan.slices.isEmpty() -> Text("Every hour of this trend has already been read.", style = MaterialTheme.typography.bodySmall)
-            else -> Text(
-                "Plan: up to ${plan.postsPlanned} posts in ${plan.slices.size} search${if (plan.slices.size == 1) "" else "es"} across ${plan.hoursCovered.size} hour${if (plan.hoursCovered.size == 1) "" else "s"}, " +
-                    "at most ${usdText(plan.maxUsd)}. " + if (vm.trendCostMeasured()) "Price per post measured at ${"$"}${"%.4f".format(perPost)}." else "Price per post assumed at ${"$"}${"%.3f".format(DEFAULT_COST_PER_POST_USD)}; the first run measures the real one.",
-                style = MaterialTheme.typography.bodySmall,
-            )
-        }
-        if (!check.ended) Text("This trend is still running, so only the hours so far are read. Best done once it has ended.", style = MaterialTheme.typography.bodySmall, color = ORGANIZED)
-        else if (ageH >= 24) Text("It ended over a day ago. X removes many spam accounts by now, so bot-like figures may read low.", style = MaterialTheme.typography.bodySmall, color = ORGANIZED)
-        Text(vm.trendPayer(), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        Button(onClick = vm::trendFull, enabled = !busy && blocked == null && plan != null && plan.slices.isNotEmpty(), modifier = Modifier.fillMaxWidth()) {
-            Text(if (plan != null && plan.slices.isNotEmpty()) "Read posts (up to ${usdText(plan.maxUsd)})" else "Read posts")
-        }
-        if (check.isFull) Text("Last sample: ${check.postsRead} posts" + (check.costUsd?.let { ", X charged ${usdText(it)} in all for this trend" } ?: "") + ".", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 

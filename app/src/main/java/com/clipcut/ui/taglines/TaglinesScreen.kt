@@ -382,7 +382,7 @@ private fun TaglineCard(
         if (check != null) TrendCheckSummary(check, zone)
         if (c.all.total > 0) {
             TextButton(onClick = onTrendCheck) {
-                Text(if (check != null) "Trend check: open or update" else "Trend check: natural or organized? (from about $0.005)")
+                Text(if (check != null) "Trend check: open or update" else "Trend check: set a range and budget")
             }
         }
     }

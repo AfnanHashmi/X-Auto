@@ -107,8 +107,11 @@ class TrendCheckService(
     }
 
     /** What a Full analysis with [budgetUsd] would buy for [check] (hours already read are skipped). Null: budget too small. */
-    fun plan(check: TrendCheckResult, budgetUsd: Double): TrendPlan? =
-        planSlices(check.hourly, check.readHours.toSet(), budgetUsd, costPerPost())
+    fun plan(check: TrendCheckResult, budgetUsd: Double): TrendPlan? = planHours(check.hourly, check.readHours.toSet(), budgetUsd)
+
+    /** The same plan from hourly counts alone, so it can be shown before anything is bought. */
+    fun planHours(hourly: List<HourBucket>, readHours: Set<Long>, budgetUsd: Double): TrendPlan? =
+        planSlices(hourly, readHours, budgetUsd, costPerPost())
 
     /**
      * Reads the planned posts, adds them to those read before, and works out the sample statistics and sentiment. The X cost

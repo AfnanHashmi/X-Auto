@@ -24,6 +24,10 @@ import com.clipcut.domain.history.HistorySummary
 import com.clipcut.domain.history.RunHistory
 import com.clipcut.domain.taglines.Detected
 import com.clipcut.domain.taglines.HOUR_MS
+import com.clipcut.domain.taglines.HourBucket
+import com.clipcut.domain.taglines.TREND_LOOKBACK_MS
+import com.clipcut.domain.taglines.TREND_MAX_BUDGET_USD
+import com.clipcut.domain.taglines.TREND_MIN_BUDGET_USD
 import com.clipcut.domain.taglines.ReadoutRecord
 import com.clipcut.domain.taglines.TrendCheckException
 import com.clipcut.domain.taglines.TrendCheckResult
@@ -75,14 +79,22 @@ data class TaglinesUiState(
     val estimatedCostUsd: Double get() = estimatedCostUsd(taglines.size)
 }
 
-/** The Trend check panel for one tagline: the range found (editable), the exact numbers, and the sample once bought. */
+/**
+ * The Trend check panel for one tagline. The time range and the budget are the user's: nothing runs until both are set
+ * and Run is tapped. "Suggest range" only fills the two fields (the user can still change them).
+ */
 data class TrendUi(
     val tagline: String,
     /** What is running right now, or null when idle. */
     val busy: String? = null,
-    val range: TrendRange? = null,
+    /** The range as the user set it (phone time, to the minute); null until picked. */
+    val startMs: Long? = null,
+    val endMs: Long? = null,
+    /** Hourly counts from "Suggest range", so the plan can be shown before anything is bought. */
+    val hours: List<HourBucket> = emptyList(),
+    /** The saved check for exactly this range, if there is one. */
     val check: TrendCheckResult? = null,
-    val budgetText: String = "1.00",
+    val budgetText: String = "",
     val error: String? = null,
     val notice: String? = null,
 ) {
@@ -281,42 +293,92 @@ class TaglinesViewModel @Inject constructor(
 
     fun trendPayer(): String = trendService.payerText()
 
-    /** What a Full analysis would buy at the typed budget; null when the budget is missing, out of range or too small. */
-    fun trendPlan(): TrendPlan? {
-        val t = _state.value.trend ?: return null
-        val check = t.check ?: return null
-        return t.budget?.let { b -> trendService.plan(check, b) }
+    /** Why the range typed in the panel cannot be used, or null when it can. */
+    fun trendRangeProblem(t: TrendUi, now: Long = System.currentTimeMillis()): String? {
+        val start = t.startMs ?: return "Pick a start time."
+        val end = t.endMs ?: return "Pick an end time."
+        return when {
+            end <= start -> "The end must be after the start."
+            end - start < HOUR_MS -> "The range must be at least 1 hour."
+            end > now + 60_000L -> "The end cannot be in the future."
+            start < now - TREND_LOOKBACK_MS -> "X only keeps the last 7 days. Pick a later start."
+            else -> null
+        }
     }
 
-    /** Opens the panel for [tagline] and shows the last check of it, if there is one. Nothing is asked of X yet. */
+    /** The user's range as the service takes it; null while it is incomplete or invalid. A range ending in the last 10 minutes counts as still running. */
+    private fun rangeOf(t: TrendUi): TrendRange? {
+        if (trendRangeProblem(t) != null) return null
+        val now = System.currentTimeMillis()
+        val end = minOf(t.endMs!!, now - 30_000L)
+        return TrendRange(t.startMs!!, end, ended = now - end > 10 * 60_000L)
+    }
+
+    /** Why the typed budget cannot be used (range, today's limit), or null when it can. */
+    fun trendBudgetProblem(t: TrendUi): String? {
+        val b = t.budget ?: return "Type a budget."
+        if (b < TREND_MIN_BUDGET_USD || b > TREND_MAX_BUDGET_USD) return "Budget must be ${usdText(TREND_MIN_BUDGET_USD)} to ${usdText(TREND_MAX_BUDGET_USD)}."
+        return trendService.blockedReason(b)
+    }
+
+    /**
+     * What the typed budget would buy, hour by hour. Needs hourly counts for the range: from a saved check of exactly this
+     * range or from "Suggest range". Null otherwise (the screen then shows the simple estimate: budget ÷ price per post).
+     */
+    fun trendPlan(): TrendPlan? {
+        val t = _state.value.trend ?: return null
+        val range = rangeOf(t) ?: return null
+        val budget = t.budget ?: return null
+        val check = t.check
+        val hourly = check?.hourly ?: t.hours.filter { it.startMs >= Math.floorDiv(range.startMs, HOUR_MS) * HOUR_MS && it.startMs < range.endMs }
+        if (hourly.isEmpty()) return null
+        return trendService.planHours(hourly, check?.readHours.orEmpty().toSet(), budget)
+    }
+
+    /** Opens the panel for [tagline]. Shows the last check of it with its range; otherwise the range and budget start empty. */
     fun openTrend(tagline: String) {
         if (!trendService.isConfigured) {
             _state.update { it.copy(error = "Trend check needs the X app keys (RW, Main or DK) in local.properties.", message = null) }
             return
         }
         val saved = trendStore.forTagline(tagline).firstOrNull()
-        _state.update {
-            it.copy(trend = TrendUi(tagline, check = saved, range = saved?.let { c -> TrendRange(c.startMs, c.endMs, c.ended) }), error = null, message = null)
-        }
+        _state.update { it.copy(trend = TrendUi(tagline, startMs = saved?.startMs, endMs = saved?.endMs, check = saved), error = null, message = null) }
     }
 
     fun closeTrend() = _state.update { if (it.trend?.busy != null) it else it.copy(trend = null) }
 
     private fun editTrend(f: (TrendUi) -> TrendUi) = _state.update { st -> st.trend?.let { st.copy(trend = f(it)) } ?: st }
 
-    /** One counts call (about $0.005): finds when the trend started and ended in the last 7 days. */
-    fun trendDetect() {
+    /** The saved check for exactly this tagline and range, so its numbers show and a new run adds to its sample. */
+    private fun savedFor(tagline: String, start: Long?, end: Long?): TrendCheckResult? =
+        if (start == null || end == null) null else trendStore.find(tagline, start)?.takeIf { it.endMs == end }
+
+    fun trendSetStart(ms: Long) = editTrend { it.copy(startMs = ms, check = savedFor(it.tagline, ms, it.endMs), error = null, notice = null) }
+
+    fun trendSetEnd(ms: Long) = editTrend { it.copy(endMs = ms, check = savedFor(it.tagline, it.startMs, ms), error = null, notice = null) }
+
+    fun trendSetBudget(text: String) = editTrend { it.copy(budgetText = text.filter { c -> c.isDigit() || c == '.' }.take(5), error = null) }
+
+    /**
+     * Optional help: one counts call (about $0.005) over the last 7 days, and the busy period found in it is written into the
+     * start and end fields. It never runs by itself, and the user can change both fields afterwards.
+     */
+    fun trendSuggest() {
         val t = _state.value.trend ?: return
         if (t.busy != null) return
-        editTrend { it.copy(busy = "Finding when the trend ran…", error = null, notice = null) }
+        editTrend { it.copy(busy = "Looking at the last 7 days of counts…", error = null, notice = null) }
         viewModelScope.launch {
             try {
                 val d: Detected = trendService.detect(t.tagline)
+                val r = d.range
                 editTrend {
-                    if (d.range == null) {
-                        it.copy(busy = null, error = "No clear trend for \"${t.tagline}\" in the last 7 days (it never reached 5 tweets an hour).")
+                    if (r == null) {
+                        it.copy(busy = null, hours = d.hourly, error = "No clear busy period for \"${t.tagline}\" in the last 7 days (it never reached 5 tweets an hour). Set the range yourself.")
                     } else {
-                        it.copy(busy = null, range = d.range, check = it.check?.takeIf { c -> c.startMs == d.range.startMs }, notice = "Range found. Check it, then count the exact numbers.")
+                        it.copy(
+                            busy = null, startMs = r.startMs, endMs = r.endMs, hours = d.hourly, check = savedFor(it.tagline, r.startMs, r.endMs),
+                            notice = "Suggested from the counts" + (if (r.ended) "" else " (still running)") + ". Change the start or end if you like.",
+                        )
                     }
                 }
             } catch (e: CancellationException) {
@@ -327,29 +389,17 @@ class TaglinesViewModel @Inject constructor(
         }
     }
 
-    /** Moves the start or the end of the range by whole hours (the range is only ever whole hours). */
-    fun trendShift(startHours: Int, endHours: Int) = editTrend { t ->
-        val r = t.range ?: return@editTrend t
-        val now = System.currentTimeMillis()
-        val start = r.startMs + startHours * HOUR_MS
-        val end = (r.endMs + endHours * HOUR_MS).coerceAtMost(now)
-        if (end - start < HOUR_MS || now - start > 7 * 24 * HOUR_MS - 2 * HOUR_MS) t
-        else t.copy(range = TrendRange(start, end, r.ended), check = t.check?.takeIf { it.startMs == start })
-    }
-
-    fun trendSetBudget(text: String) = editTrend { it.copy(budgetText = text.filter { c -> c.isDigit() || c == '.' }.take(5), error = null) }
-
-    /** Four counts calls (about $0.02) for the chosen range: the exact retweet, reply and quote shares, launch and waves. */
+    /** Refresh only the exact numbers for the chosen range: four counts calls (about $0.02). Reads no posts. */
     fun trendLive() {
         val t = _state.value.trend ?: return
-        val range = t.range ?: return
         if (t.busy != null) return
-        editTrend { it.copy(busy = "Counting the trend…", error = null, notice = null) }
+        val range = rangeOf(t) ?: run { editTrend { it.copy(error = trendRangeProblem(t)) }; return }
+        editTrend { it.copy(busy = "Counting the range…", error = null, notice = null) }
         viewModelScope.launch {
             try {
                 val c = trendService.live(t.tagline, range)
                 refreshChecks()
-                editTrend { it.copy(busy = null, check = c, notice = "Exact numbers updated.") }
+                editTrend { it.copy(busy = null, startMs = c.startMs, endMs = c.endMs, check = c, notice = "Exact numbers updated.") }
                 publishTrend()
             } catch (e: CancellationException) {
                 throw e
@@ -359,26 +409,37 @@ class TaglinesViewModel @Inject constructor(
         }
     }
 
-    /** Reads the planned posts inside the typed budget, then works out the sample figures and sentiment. */
-    fun trendFull() {
+    /**
+     * Run: counts the chosen range (about $0.02), then reads posts inside the typed budget and works out the sample figures
+     * and sentiment. Nothing is spent when the range or the budget is not valid.
+     */
+    fun trendRun() {
         val t = _state.value.trend ?: return
-        val check = t.check ?: return
-        val budget = t.budget ?: return
         if (t.busy != null) return
-        editTrend { it.copy(busy = "Reading posts and judging them… this can take a minute", error = null, notice = null) }
+        val range = rangeOf(t) ?: run { editTrend { it.copy(error = trendRangeProblem(t)) }; return }
+        trendBudgetProblem(t)?.let { p -> editTrend { it.copy(error = p) }; return }
+        val budget = t.budget ?: return
+        editTrend { it.copy(busy = "Counting the range…", error = null, notice = null) }
         viewModelScope.launch {
             try {
-                val c = trendService.full(check, budget)
+                val counted = trendService.live(t.tagline, range)
+                editTrend { it.copy(startMs = counted.startMs, endMs = counted.endMs, check = counted) }
+                if (counted.shares.all == 0L) {
+                    refreshChecks()
+                    editTrend { it.copy(busy = null, error = "No tweets with \"${t.tagline}\" in this range, so no posts were bought.") }
+                    return@launch
+                }
+                editTrend { it.copy(busy = "Reading posts and judging them… this can take a minute") }
+                val c = trendService.full(counted, budget)
                 refreshChecks()
-                editTrend { it.copy(busy = null, check = c, notice = "Done. X charged ${usdText(c.costUsd ?: 0.0)} in total for this trend.") }
+                editTrend { it.copy(busy = null, check = c, notice = "Done. X charged ${usdText(c.costUsd ?: 0.0)} in all for posts in this range.") }
                 publishTrend()
             } catch (e: CancellationException) {
                 throw e
             } catch (e: TrendCheckException) {
                 // Whatever was bought is kept even when a step failed.
-                val kept = trendStore.find(check.tagline, check.startMs)
                 refreshChecks()
-                editTrend { it.copy(busy = null, check = kept ?: it.check, error = e.message) }
+                editTrend { it.copy(busy = null, check = trendStore.find(t.tagline, range.startMs) ?: it.check, error = e.message) }
             }
         }
     }
