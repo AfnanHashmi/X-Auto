@@ -55,6 +55,7 @@ import com.clipcut.ui.components.Pill
 import com.clipcut.ui.deletion.DeletionActivity
 import com.clipcut.ui.bossmeter.BossMeterActivity
 import com.clipcut.ui.taglines.TaglinesActivity
+import com.clipcut.ui.scheduler.SchedulerActivity
 import com.clipcut.ui.top5.Top5Activity
 import com.clipcut.ui.unfollows.UnfollowsActivity
 import com.clipcut.domain.api.Balance
@@ -189,6 +190,7 @@ fun HomeScreen(modifier: Modifier = Modifier, viewModel: HomeViewModel = hiltVie
             OutlinedButton(onClick = viewModel::sendAll, modifier = Modifier.fillMaxWidth()) { Text("↻ Refresh website: Taglines and Boss Meter") }
             syncNote?.let { Text(it, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant) }
             NavTile("Top 5 of the week", "Weekly ranking for the website", onClick = { Top5Activity.start(context) }, modifier = Modifier.fillMaxWidth(), accent = MaterialTheme.colorScheme.tertiary)
+            NavTile("Recorder PC", "Start recording, upload and shut down the laptop", onClick = { SchedulerActivity.start(context) }, modifier = Modifier.fillMaxWidth())
             NavTile(
                 "Trigger Deletion",
                 "Review and delete posts from @${active.handle}",

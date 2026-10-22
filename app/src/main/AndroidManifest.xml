@@ -60,6 +60,11 @@
             android:name=".ui.bossmeter.BossMeterActivity"
             android:exported="false"
             android:theme="@style/Theme.ClipCut" />
+        <!-- Recorder PC: start recording / run the night upload on the laptop over Tailscale. -->
+        <activity
+            android:name=".ui.scheduler.SchedulerActivity"
+            android:exported="false"
+            android:theme="@style/Theme.ClipCut" />
         <activity
             android:name=".ui.top5.Top5Activity"
             android:exported="false"

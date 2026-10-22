@@ -55,6 +55,8 @@ android {
             "WEBSITE_PUBLISH_KEY",
             // Boss Meter's Instagram side: the igscraper server's address and its X-API-Key.
             "IG_BASE_URL", "IG_API_KEY",
+            // The laptop's recording scheduler (D:\r2-transfer): its Tailscale address and bearer token.
+            "SCHEDULER_URL", "SCHEDULER_TOKEN",
         )) {
             buildConfigField("String", key, "\"${localProperties.getProperty(key, "")}\"")
         }
