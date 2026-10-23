@@ -53,8 +53,6 @@ android {
             "UNFOLLOW_URL", "UNFOLLOW_TOKEN",
             // The website the Boss Meter and Tagline Counter results are published to: the bearer key it accepts.
             "WEBSITE_PUBLISH_KEY",
-            // Boss Meter's Instagram side: the igscraper server's address and its X-API-Key.
-            "IG_BASE_URL", "IG_API_KEY",
             // The laptop's recording scheduler (D:\r2-transfer): its Tailscale address and bearer token.
             "SCHEDULER_URL", "SCHEDULER_TOKEN",
         )) {

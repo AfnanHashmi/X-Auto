@@ -1,8 +1,6 @@
 package com.clipcut.domain.share
 
 import com.clipcut.domain.bossmeter.BossMeterResult
-import com.clipcut.domain.bossmeter.IgBossResult
-import com.clipcut.domain.bossmeter.Overall
 
 /** X's post limit. */
 const val X_POST_LIMIT = 280
@@ -20,16 +18,14 @@ fun xLength(s: String): Int {
 }
 
 /** One line of a share image: a label, a value to print, and how full its bar is (0..1). */
-data class ShareRow(val label: String, val value: String, val fraction: Float, val split: Float? = null)
+data class ShareRow(val label: String, val value: String, val fraction: Float)
 
-/** [twoColor] draws each bar in two colours (X, then Instagram) using each row's [ShareRow.split], with a legend. */
 data class ShareContent(
     val title: String,
     val subtitle: String,
     val rows: List<ShareRow>,
     val footer: String,
     val caption: String,
-    val twoColor: Boolean = false,
 )
 
 private fun n(v: Long) = "%,d".format(v)
@@ -49,38 +45,6 @@ fun fitCaption(header: String, lines: List<String>, footer: String): String {
 }
 
 private val MEDALS = listOf("🥇", "🥈", "🥉") // gold, silver, bronze
-
-fun instagramShare(r: IgBossResult, dateText: String): ShareContent {
-    val top = r.items.firstOrNull()?.count?.coerceAtLeast(1L) ?: 1L
-    val rows = r.items.map { ShareRow(it.label, "${n(it.count)}  (${"%.1f".format(it.share)}%)", it.count.toFloat() / top) }
-    val lines = r.items.mapIndexed { i, t -> "${MEDALS.getOrElse(i) { "${i + 1}." }} ${t.label}: ${n(t.count)} (${"%.1f".format(t.share)}%)" }
-    return ShareContent(
-        title = "BOSS METER · INSTAGRAM",
-        subtitle = "Share of hashtag votes in the Instagram comments",
-        rows = rows,
-        footer = "${n(r.tracked)} hashtag votes counted  ·  Instagram comments  ·  $dateText",
-        caption = fitCaption("🔥 Boss Meter : Update (Instagram)", lines + "Total votes counted: ${n(r.tracked)}", "Counted from Instagram comments, $dateText"),
-    )
-}
-
-fun overallShare(o: Overall, dateText: String): ShareContent {
-    val top = o.rows.firstOrNull()?.total?.coerceAtLeast(1L) ?: 1L
-    val rows = o.rows.map { r ->
-        val parts = (r.x ?: 0L) + (r.ig ?: 0L)
-        ShareRow(r.label, "${n(r.total)}  (${"%.1f".format(r.share)}%)", r.total.toFloat() / top, if (parts == 0L) null else (r.x ?: 0L).toFloat() / parts)
-    }
-    val lines = o.rows.mapIndexed { i, r ->
-        "${MEDALS.getOrElse(i) { "${i + 1}." }} ${r.label}: ${n(r.total)} (${"%.1f".format(r.share)}%) · X ${r.x?.let(::n) ?: "-"} · IG ${r.ig?.let(::n) ?: "-"}"
-    }
-    return ShareContent(
-        title = "BOSS METER · OVERALL",
-        subtitle = "X + Instagram, share of hashtag votes",
-        rows = rows,
-        footer = "${n(o.tracked)} hashtag votes counted  ·  X + Instagram  ·  $dateText",
-        caption = fitCaption("🔥 Boss Meter : Update (X + Instagram)", lines + "Total votes counted: ${n(o.tracked)}", "X + Instagram, $dateText"),
-        twoColor = true,
-    )
-}
 
 fun bossMeterShare(r: BossMeterResult, dateText: String): ShareContent {
     val ranked = r.ranked

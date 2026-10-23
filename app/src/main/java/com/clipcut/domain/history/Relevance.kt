@@ -41,8 +41,6 @@ data class ContestantWeek(
     val bossWins: Int,
     /** Best trending position typed when sharing (1 is best), if any. */
     val bestTrending: Int?,
-    /** Instagram comments (all of them, replies too) that mention them this week by hashtag, @handle or name; null: Instagram not included. */
-    val igMentions: Long? = null,
     /**
      * Tagline tweets this week that look natural (tweets x the natural share of the Trend check made for that tagline), or
      * null when none of their taglines had a Trend check with a sample. Missing is not zero.
@@ -55,16 +53,15 @@ data class ContestantWeek(
 
 /** How much each fact weighs in the score. Each fact is scored against the week's best contestant for it (0 to 1). */
 val RELEVANCE_WEIGHTS = linkedMapOf(
-    "Tagline tweets" to 0.15,
-    "Original tweets" to 0.08,
-    "Tagline wins" to 0.08,
-    "Peak hour" to 0.04,
-    "Boss Meter share" to 0.20,
-    "Boss Meter wins" to 0.08,
-    "Trending" to 0.10,
-    "Instagram mentions" to 0.12,
-    "Natural support" to 0.10,
-    "Positive mood" to 0.05,
+    "Tagline tweets" to 0.17,
+    "Original tweets" to 0.09,
+    "Tagline wins" to 0.09,
+    "Peak hour" to 0.05,
+    "Boss Meter share" to 0.23,
+    "Boss Meter wins" to 0.09,
+    "Trending" to 0.11,
+    "Natural support" to 0.11,
+    "Positive mood" to 0.06,
 )
 
 /** Facts that only exist for contestants whose taglines had a Trend check. Without one, a contestant is scored on the rest, not given 0. */
@@ -82,7 +79,6 @@ data class Relevance(val week: ContestantWeek, val score: Int, val parts: Map<St
             if (week.taglineWins > 0) "${week.taglineWins} tagline ${if (week.taglineWins == 1) "win" else "wins"}" else null,
             week.bossShare?.let { "${"%.0f".format(it)}% Boss Meter votes" },
             if (week.bossWins > 0) "${week.bossWins} Boss Meter ${if (week.bossWins == 1) "win" else "wins"}" else null,
-            week.igMentions?.takeIf { it > 0 }?.let { "${short(it)} Instagram mentions" },
             week.naturalTweets?.takeIf { week.tweets > 0 }?.let { "~${(100.0 * it / week.tweets).roundToInt().coerceIn(0, 100)}% natural" },
             week.mood?.let { "mood ${if (it >= 0) "+" else ""}${(it * 100).roundToInt()}" },
             week.bestTrending?.let { "best #$it Trending" },
@@ -105,8 +101,6 @@ fun weekStats(
     contestantOf: (String) -> String?,
     sinceMs: Long,
     untilMs: Long,
-    /** Instagram comments mentioning each contestant (display name to count), when the Instagram side is included. */
-    igMentions: Map<String, Long>? = null,
     /** Trend checks made in the week (any of them): their natural share and the mood of the sampled posts feed the score. */
     checks: List<TrendCheckResult> = emptyList(),
 ): List<ContestantWeek> {
@@ -179,13 +173,6 @@ fun weekStats(
     }
     boss.flatMap { it.result.tags }.forEach { t -> contestantOf(t.tag)?.let { display.putIfAbsent(it.lowercase(), it) } }
     history.trending(sinceMs).forEach { m -> contestantOf(m.tagline)?.let { display.putIfAbsent(it.lowercase(), it) } }
-    val ig = HashMap<String, Long>()
-    igMentions?.forEach { (name, n) ->
-        if (n > 0) {
-            ig[name.lowercase()] = (ig[name.lowercase()] ?: 0) + n
-            display.putIfAbsent(name.lowercase(), name)
-        }
-    }
 
     // Trend checks: natural tweets per contestant, and how the sampled posts about each contestant felt.
     val natural = HashMap<String, Long>()
@@ -219,7 +206,6 @@ fun weekStats(
             bossPosts = shares[id]?.size ?: 0,
             bossWins = bossWins[id] ?: 0,
             bestTrending = trending[id],
-            igMentions = igMentions?.let { ig[id] ?: 0L },
             naturalTweets = natural[id],
             mood = moodAll[id]?.takeIf { it >= MIN_MOOD_POSTS }?.let { n -> ((moodPos[id] ?: 0) - (moodNeg[id] ?: 0)).toDouble() / n },
             moodPosts = moodAll[id] ?: 0,
@@ -244,7 +230,6 @@ fun relevance(weeks: List<ContestantWeek>): List<Relevance> {
         "Boss Meter wins" to { w -> w.bossWins.toDouble() },
         // Trending #1 scores 1.0, #50 about 0.02; none scores 0.
         "Trending" to { w -> w.bestTrending?.let { (51.0 - it.coerceIn(1, 50)) / 50.0 } ?: 0.0 },
-        "Instagram mentions" to { w -> (w.igMentions ?: 0L).toDouble() },
         "Natural support" to { w -> w.naturalTweets?.toDouble() },
         // -1..+1 mapped to 0..1, so an all-negative contestant scores 0 and an all-positive one 1.
         "Positive mood" to { w -> w.mood?.let { (it + 1.0) / 2.0 } },

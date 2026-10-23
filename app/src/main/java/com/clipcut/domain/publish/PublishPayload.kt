@@ -1,8 +1,6 @@
 package com.clipcut.domain.publish
 
 import com.clipcut.domain.bossmeter.BossMeterResult
-import com.clipcut.domain.bossmeter.IgBossResult
-import com.clipcut.domain.bossmeter.Overall
 import com.clipcut.domain.taglines.CountReport
 import com.clipcut.domain.taglines.GridException
 import com.clipcut.domain.taglines.HOUR_MS
@@ -24,11 +22,6 @@ enum class MeterKind(val wire: String, val label: String) {
     BOSS("boss", "Boss Meter"),
     TREND("trend", "Tagline Counter"),
     TOP5("top5", "Top 5 of the week"),
-
-    // The Instagram and Overall views of a Boss Meter run. They go to the website as kind "boss" with a source, but each
-    // needs its own slot here so the three never replace one another while on their way.
-    BOSS_IG("boss-instagram", "Boss Meter · Instagram"),
-    BOSS_OVERALL("boss-overall", "Boss Meter · Overall"),
 }
 
 /** Which post of a Boss Meter round a run is: the one with the 5 contestants, or the one with the 2 finalists. */
@@ -88,9 +81,6 @@ data class MeterItem(
     val count: Long?,
     val hourly: List<Long>? = null,
     val insights: List<String>? = null,
-    /** Overall only: the part of [count] that came from X and from Instagram (null: that source had no data). */
-    val x: Long? = null,
-    val ig: Long? = null,
 )
 
 private val POST_LINK = Regex("""^(?:https?://)?(?:www\.|mobile\.)?(?:x|twitter)\.com/([A-Za-z0-9_]{1,15})/status(?:es)?/(\d{5,25})(?:[/?#].*)?$""", RegexOption.IGNORE_CASE)
@@ -114,7 +104,7 @@ fun validateItems(items: List<MeterItem>) {
     val seen = HashSet<String>()
     for (i in items) {
         if (i.label.isEmpty() || i.label.length > MAX_LABEL) throw PayloadException("A label must be 1 to $MAX_LABEL characters: \"${i.label.take(30)}\".")
-        if ((i.count ?: 0) < 0 || (i.x ?: 0) < 0 || (i.ig ?: 0) < 0) throw PayloadException("A count cannot be negative (${i.label}).")
+        if ((i.count ?: 0) < 0) throw PayloadException("A count cannot be negative (${i.label}).")
         i.insights?.let(::validateInsights)
         if (!seen.add(i.label)) throw PayloadException("The label \"${i.label}\" appears twice.")
         i.hourly?.let { h ->
@@ -133,8 +123,6 @@ fun validateInsights(lines: List<String>) {
 private fun itemsJson(items: List<MeterItem>) = JSONArray(items.map { item ->
     JSONObject().put("label", item.label).apply {
         item.count?.let { put("count", it) }
-        item.x?.let { put("x", it) }
-        item.ig?.let { put("ig", it) }
         item.hourly?.let { put("hourly", JSONArray(it)) }
         item.insights?.let { put("insights", JSONArray(it)) }
     }
@@ -157,69 +145,6 @@ fun bossPayload(result: BossMeterResult, postLink: String, stage: BossStage? = n
     if (withInsights) cleanInsights(bossInsights(result))?.let { body.put("insights", JSONArray(it)) }
     body.put("items", itemsJson(items))
     return PublishPayload(MeterKind.BOSS, body.toString())
-}
-
-private fun instagramUrl(shortcode: String) = "https://www.instagram.com/p/$shortcode/"
-
-private fun nf(v: Long) = "%,d".format(v)
-
-/**
- * The Instagram view of a Boss Meter run, sent as kind "boss" with source "instagram". It carries the X run's [refreshedAtMs]
- * so the website can put the three views of one run together.
- */
-fun instagramPayload(ig: IgBossResult, refreshedAtMs: Long, shortcode: String, stage: BossStage? = null, final: Boolean = false): PublishPayload {
-    if (ig.empty) throw PayloadException("Instagram has no comments for this post yet.")
-    if (final && stage != BossStage.FINALISTS) throw PayloadException("\"Final result\" is only for the finalists' post.")
-    val items = ig.items.mapIndexed { i, t ->
-        val next = ig.items.getOrNull(i + 1)
-        MeterItem(
-            t.label, t.count,
-            insights = cleanInsights(listOfNotNull(
-                "${"%.1f".format(t.share)}% of hashtag votes",
-                next?.takeIf { t.count > it.count }?.let { "${nf(t.count - it.count)} ahead of ${it.label}" },
-            )),
-        )
-    }
-    validateItems(items)
-    val body = JSONObject().put("kind", "boss").put("source", "instagram").put("refreshedAt", isoUtc(refreshedAtMs)).put("postUrl", instagramUrl(shortcode))
-    stage?.let { body.put("stage", it.wire) }
-    if (final) body.put("final", true)
-    cleanInsights(listOfNotNull(
-        if (ig.total > 0) "${nf(ig.tracked)} of ${nf(ig.total)} comments used a tracked hashtag (${"%.0f".format(ig.tracked * 100.0 / ig.total)}%)." else null,
-        ig.leadText?.let { "$it votes." },
-    ))?.let { body.put("insights", JSONArray(it)) }
-    body.put("total", ig.total).put("tracked", ig.tracked).put("uncounted", ig.uncounted)
-    body.put("items", itemsJson(items))
-    return PublishPayload(MeterKind.BOSS_IG, body.toString())
-}
-
-/** The Overall view: X and Instagram added together, each item with its X and Instagram part for the two-colour bar. */
-fun overallPayload(o: Overall, refreshedAtMs: Long, xLink: String, igShortcode: String, stage: BossStage? = null, final: Boolean = false): PublishPayload {
-    val url = canonicalPostUrl(xLink) ?: throw PayloadException("The website needs a full post link with the user name (https://x.com/user/status/123…).")
-    if (final && stage != BossStage.FINALISTS) throw PayloadException("\"Final result\" is only for the finalists' post.")
-    val items = o.rows.mapIndexed { i, r ->
-        val next = o.rows.getOrNull(i + 1)
-        MeterItem(
-            r.label, r.total,
-            insights = cleanInsights(listOfNotNull(
-                "${"%.1f".format(r.share)}% of hashtag votes",
-                next?.takeIf { r.total > it.total }?.let { "${nf(r.total - it.total)} ahead of ${it.label}" },
-            )),
-            x = r.x, ig = r.ig,
-        )
-    }
-    validateItems(items)
-    val body = JSONObject().put("kind", "boss").put("source", "overall").put("refreshedAt", isoUtc(refreshedAtMs))
-        .put("postUrl", url).put("igPostUrl", instagramUrl(igShortcode))
-    stage?.let { body.put("stage", it.wire) }
-    if (final) body.put("final", true)
-    cleanInsights(listOfNotNull(
-        if (o.total > 0) "${nf(o.tracked)} of ${nf(o.total)} replies and comments used a tracked hashtag (${"%.0f".format(o.tracked * 100.0 / o.total)}%)." else null,
-        o.leadText?.let { "$it votes." },
-    ))?.let { body.put("insights", JSONArray(it)) }
-    body.put("total", o.total).put("tracked", o.tracked).put("uncounted", o.uncounted)
-    body.put("items", itemsJson(items))
-    return PublishPayload(MeterKind.BOSS_OVERALL, body.toString())
 }
 
 /** About the whole run: how much of the thread voted with a tracked hashtag. */

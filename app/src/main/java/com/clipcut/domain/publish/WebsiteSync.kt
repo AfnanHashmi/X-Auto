@@ -1,9 +1,6 @@
 package com.clipcut.domain.publish
 
-import com.clipcut.domain.bossmeter.BossMeterResult
 import com.clipcut.domain.bossmeter.BossMeterStore
-import com.clipcut.domain.bossmeter.overall
-import com.clipcut.domain.bossmeter.shortcodeFrom
 import com.clipcut.domain.history.RunHistory
 import com.clipcut.domain.taglines.TrendCheckStore
 import com.clipcut.domain.taglines.TaglineStore
@@ -56,32 +53,11 @@ class WebsiteSync @Inject constructor(
             val payload = bossPayload(result, link, useStage, useFinal, withInsights = true)
             history.saveBoss(result, link, useStage?.wire.orEmpty(), useFinal)
             publisher.publish(payload)
-            sendInstagramViews(result, link, useStage, useFinal)
             SyncResult.Queued
         } catch (e: PayloadException) {
             val why = e.message ?: "The website cannot take this result."
             publisher.reject(MeterKind.BOSS, why)
             SyncResult.Nothing(why)
-        }
-    }
-
-    /**
-     * The Instagram and Overall views of a Boss Meter run, from the Instagram numbers the app holds. They carry the X
-     * run's time so the website can put the three together. Nothing is sent when there are no Instagram numbers; a view
-     * the website would refuse is reported beside its own status and does not stop the others.
-     */
-    fun sendInstagramViews(result: BossMeterResult, link: String, stage: BossStage?, final: Boolean) {
-        val ig = boss.igResult()?.takeUnless { it.empty } ?: return
-        val code = shortcodeFrom(boss.igPost) ?: return
-        try {
-            publisher.publish(instagramPayload(ig, result.fetchedAtMs, code, stage, final))
-        } catch (e: PayloadException) {
-            publisher.reject(MeterKind.BOSS_IG, e.message ?: "The website cannot take this result.")
-        }
-        try {
-            overall(result, ig)?.let { publisher.publish(overallPayload(it, result.fetchedAtMs, link, code, stage, final)) }
-        } catch (e: PayloadException) {
-            publisher.reject(MeterKind.BOSS_OVERALL, e.message ?: "The website cannot take this result.")
         }
     }
 

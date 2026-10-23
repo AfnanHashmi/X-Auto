@@ -7,15 +7,7 @@ import com.clipcut.domain.bossmeter.BossMeterResult
 import com.clipcut.domain.bossmeter.BossMeterService
 import com.clipcut.domain.bossmeter.BossMeterStore
 import com.clipcut.domain.bossmeter.bossMeterCostUsd
-import com.clipcut.domain.bossmeter.IgBossApi
-import com.clipcut.domain.bossmeter.IgBossResult
-import com.clipcut.domain.bossmeter.IgException
-import com.clipcut.domain.bossmeter.IgWatch
 import com.clipcut.domain.bossmeter.MIN_POST_ID_LENGTH
-import com.clipcut.domain.bossmeter.Overall
-import com.clipcut.domain.bossmeter.overall
-import com.clipcut.domain.bossmeter.parseIgBoss
-import com.clipcut.domain.bossmeter.shortcodeFrom
 import com.clipcut.domain.bossmeter.POST_READ_USD
 import com.clipcut.domain.bossmeter.hashtagsFrom
 import com.clipcut.domain.bossmeter.lookalikeFixes
@@ -46,9 +38,6 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
-/** The three views of Boss Meter: X (as always), Instagram, and both added together. */
-enum class BossTab(val label: String) { X("X"), INSTAGRAM("Instagram"), OVERALL("Overall") }
-
 data class BossMeterUiState(
     val link: String = "",
     val hashtagText: String = "",
@@ -67,20 +56,7 @@ data class BossMeterUiState(
     val final: Boolean = false,
     /** The post is being read for its hashtags (one X call). */
     val reading: Boolean = false,
-    val tab: BossTab = BossTab.X,
-    /** The Instagram post (link or shortcode) and the numbers the server last gave for it. */
-    val igPost: String = "",
-    val excludeHidden: Boolean = false,
-    val ig: IgBossResult? = null,
-    val igBusy: Boolean = false,
-    val igWatch: IgWatch? = null,
-    val igConfigured: Boolean = false,
-    val igError: String? = null,
-    val igMessage: String? = null,
 ) {
-    val igShortcode: String? get() = shortcodeFrom(igPost)
-    val overall: Overall? get() = overall(result, ig)
-    val canAskInstagram: Boolean get() = igConfigured && !igBusy && igShortcode != null && hashtags.isNotEmpty()
     val hashtags: List<String> get() = hashtagsFrom(hashtagText)
     val postId: String? get() = postIdFrom(link)
     val calls: Int get() = hashtags.size + 1
@@ -99,7 +75,6 @@ class BossMeterViewModel @Inject constructor(
     private val history: RunHistory,
     private val contestants: ContestantStore,
     private val sync: WebsiteSync,
-    private val instagram: IgBossApi,
 ) : ViewModel() {
     /** Sends the latest run (stage, final flag, insights) to the website again. No X calls, no cost. */
     fun sendToWebsite() {
@@ -137,25 +112,12 @@ class BossMeterViewModel @Inject constructor(
 
     fun retryPublish() = publisher.retry(MeterKind.BOSS)
 
-    /** The website's state for the Instagram and Overall views of the last run. */
-    val igPublishStatus: StateFlow<PublishStatus> = publisher.status.map { it.getValue(MeterKind.BOSS_IG) }
-        .stateIn(viewModelScope, SharingStarted.Eagerly, PublishStatus.Idle)
-    val overallPublishStatus: StateFlow<PublishStatus> = publisher.status.map { it.getValue(MeterKind.BOSS_OVERALL) }
-        .stateIn(viewModelScope, SharingStarted.Eagerly, PublishStatus.Idle)
-
-    fun retryIgPublish() = publisher.retry(MeterKind.BOSS_IG)
-    fun retryOverallPublish() = publisher.retry(MeterKind.BOSS_OVERALL)
-
     private val _state = MutableStateFlow(
         BossMeterUiState(
             link = store.link,
             hashtagText = store.hashtags,
             result = store.lastResult(),
             stage = BossStage.from(store.stage) ?: BossStage.defaultFor(hashtagsFrom(store.hashtags).size),
-            igPost = store.igPost,
-            excludeHidden = store.igExcludeHidden,
-            ig = store.igRaw.takeIf { it.isNotEmpty() }?.let { runCatching { parseIgBoss(it, store.igFetchedAt) }.getOrNull() },
-            igConfigured = instagram.isConfigured,
         ),
     )
 
@@ -175,133 +137,6 @@ class BossMeterViewModel @Inject constructor(
                     is PublishStatus.Failed -> Unit // the switch stays on; Retry resends the same final run
                     else -> Unit
                 }
-            }
-        }
-    }
-
-    fun setTab(tab: BossTab) {
-        _state.update { it.copy(tab = tab) }
-        if (tab != BossTab.X) refreshWatch()
-    }
-
-    fun setIgPost(v: String) {
-        store.igPost = v
-        _state.update { it.copy(igPost = v, igError = null, igMessage = null, igWatch = null) }
-    }
-
-    fun setExcludeHidden(on: Boolean) {
-        store.igExcludeHidden = on
-        _state.update { it.copy(excludeHidden = on) }
-    }
-
-    /** Asks the server to start watching the post (it backfills, then keeps up). Free: no X calls. */
-    fun watchInstagram() {
-        val s = _state.value
-        val code = s.igShortcode ?: return _state.update { it.copy(igError = "That is not an Instagram post link.") }
-        _state.update { it.copy(igBusy = true, igError = null, igMessage = null) }
-        viewModelScope.launch {
-            try {
-                instagram.watch(s.igPost.trim())
-                _state.update { it.copy(igBusy = false, igMessage = "The server is watching $code. Counts appear as it fetches the comments.") }
-                refreshWatch()
-            } catch (e: IgException) {
-                _state.update { it.copy(igBusy = false, igError = e.message) }
-            }
-        }
-    }
-
-    private fun refreshWatch() {
-        val code = _state.value.igShortcode ?: return
-        if (!instagram.isConfigured) return
-        viewModelScope.launch {
-            try {
-                val w = instagram.status(code)
-                _state.update { it.copy(igWatch = w) }
-                // A catch-up started earlier (even from another visit to this screen) is still running on the server: pick it up.
-                if (w?.status?.startsWith("catching up") == true) waitForCatchUp(code)
-            } catch (e: IgException) {
-                _state.update { it.copy(igError = e.message) }
-            }
-        }
-    }
-
-    private var waitingCatchUp = false
-
-    /**
-     * Follows a catch-up that runs on the server. The work does not depend on the phone: leaving the screen or losing the
-     * connection to the PC for a while does not stop it, and a status check that fails is simply tried again. When the
-     * screen is opened again while it is still running, this picks it up from [refreshWatch]. Counts are loaded when it ends.
-     */
-    private fun waitForCatchUp(code: String) {
-        if (waitingCatchUp) return
-        waitingCatchUp = true
-        _state.update { it.copy(igBusy = true, igError = null, igMessage = "The PC is fetching new Instagram comments. You can leave this screen; it keeps going and the numbers update when you come back.") }
-        viewModelScope.launch {
-            var done = false
-            try {
-                val deadline = System.currentTimeMillis() + 45 * 60_000L
-                while (System.currentTimeMillis() < deadline) {
-                    delay(3_000)
-                    val w = try { instagram.status(code) } catch (e: IgException) { null } // connection hiccup: keep waiting
-                    if (w != null) {
-                        _state.update { it.copy(igWatch = w) }
-                        if (!w.status.startsWith("catching up")) { done = true; break }
-                    }
-                }
-            } finally {
-                waitingCatchUp = false
-                _state.update { it.copy(igBusy = false) }
-            }
-            if (done) {
-                _state.update { it.copy(igMessage = "Caught up with Instagram.") }
-                if (_state.value.hashtags.isNotEmpty()) fetchInstagram(null)
-            } else {
-                _state.update { it.copy(igError = "Still catching up on the PC. Open this screen again in a few minutes, then tap Recount.", igMessage = null) }
-            }
-        }
-    }
-
-    /**
-     * The only thing that makes the server fetch new comments from Instagram (it is in manual mode and idle otherwise).
-     * The PC does the work in its own time (it carries on if you leave the screen); counts load when it is done. Free: X is not called.
-     */
-    fun catchUpInstagram() {
-        val s = _state.value
-        val code = s.igShortcode
-        if (!s.igConfigured || code == null || s.igBusy) return
-        _state.update { it.copy(igBusy = true, igError = null, igMessage = "Asking the PC to fetch new comments…") }
-        viewModelScope.launch {
-            try {
-                instagram.startCatchUp(code) // returns at once; the PC does the work
-                waitForCatchUp(code)
-            } catch (e: IgException) {
-                _state.update { it.copy(igBusy = false, igError = e.message) }
-            }
-        }
-    }
-
-    /** The Instagram numbers from the comments stored so far (does not fetch new ones; use [catchUpInstagram] for that). Free. */
-    fun refreshInstagram() = fetchInstagram(null)
-
-    /**
-     * Gets the Instagram counts for the tracked hashtags. [untilTs] cuts the count off at that moment, so a count made with
-     * X's lines up with it. A failure here never touches the X result.
-     */
-    private fun fetchInstagram(untilTs: Long?, then: (IgBossResult) -> Unit = {}) {
-        val s = _state.value
-        val code = s.igShortcode
-        if (!s.igConfigured || code == null || s.hashtags.isEmpty()) return
-        _state.update { it.copy(igBusy = true, igError = null, igMessage = null) }
-        viewModelScope.launch {
-            try {
-                val r = instagram.boss(code, s.hashtags, untilTs, s.excludeHidden)
-                store.igRaw = r.raw
-                store.igFetchedAt = r.fetchedAtMs
-                _state.update { it.copy(igBusy = false, ig = r) }
-                refreshWatch()
-                then(r)
-            } catch (e: IgException) {
-                _state.update { it.copy(igBusy = false, igError = e.message) }
             }
         }
     }
@@ -391,12 +226,6 @@ class BossMeterViewModel @Inject constructor(
                     publishInBackground(out.result, s.link, s.stage, s.final) // after the result is on screen
                 }
                 is BossMeterOutcome.Failed -> _state.update { it.copy(running = false, progress = null, error = out.reason) }
-            }
-            // Instagram is counted when X is: up to the moment of X's count, so both sides cover the same time.
-            val done = out as? BossMeterOutcome.Done
-            fetchInstagram(done?.result?.fetchedAtMs?.div(1000)) {
-                // The website gets the Instagram and Overall views of this run once the Instagram numbers are in.
-                if (done != null) sync.sendInstagramViews(done.result, s.link, s.stage, s.final)
             }
         }
     }

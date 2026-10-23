@@ -40,15 +40,6 @@ private val KEYS: List<Key> = ROSTER.map { c ->
     Key(c, firstNames.filter { it.length >= 4 && it !in PLAIN_WORDS }.toSet(), squashedForms.toSet())
 }
 
-/** What the Instagram side needs to find a contestant in comments: full names and hashtags (strong), first names and fan spellings (single). */
-data class MentionKeys(val name: String, val strong: List<String>, val single: List<String>)
-
-fun mentionKeys(): List<MentionKeys> = KEYS.map { k ->
-    val first = k.contestant.name.substringBefore(" (").substringBefore(" ")
-    // "...IsTheBoss" keeps its capital I: the server also looks for the lowercase-L lookalike of it.
-    MentionKeys(k.contestant.name, (k.squashed + "${first}IsTheBoss").toList(), k.single.toList())
-}
-
 /** The words of a tagline or hashtag: camel case is split ("KanikaIsTheBoss" → Kanika, Is, The, Boss). */
 private fun wordsOf(text: String): List<String> {
     val t = text.trim().removePrefix("#")
