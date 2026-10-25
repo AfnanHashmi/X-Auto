@@ -1,7 +1,5 @@
 package com.clipcut.domain.history
 
-import com.clipcut.domain.bossmeter.BossMeterResult
-import com.clipcut.domain.bossmeter.TagCount
 import com.clipcut.domain.taglines.CountReport
 import com.clipcut.domain.taglines.decodeReport
 import com.clipcut.domain.taglines.encodeReport
@@ -9,22 +7,18 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 
-/** One Boss Meter run as kept in the history: the result and the post it was for. */
-/** [stage] is "contestants" or "finalists" (blank for runs saved before stages existed); [final] marks the final result. */
-data class BossRun(val result: BossMeterResult, val link: String, val stage: String = "", val final: Boolean = false)
-
 /** A trending position the user typed when sharing: for which count and tagline, and when. */
 data class TrendingMark(val reportAtMs: Long, val tagline: String, val position: Int, val atMs: Long)
 
 /** How much is kept since a moment, for the "collected this week" line. */
-data class HistorySummary(val taglineRuns: Int, val bossRuns: Int, val trendingMarks: Int)
+data class HistorySummary(val taglineRuns: Int, val trendingMarks: Int)
 
 /** Runs are kept this long; X's counts endpoint itself only reaches back 7 days, so these are the only copy. */
 const val HISTORY_KEEP_DAYS = 90L
 
 /**
- * Every Tagline Counter count and every Boss Meter run, each in its own file under [dir], never replaced: the raw
- * material for the website's Updates tab (tagline timeline, Boss Meter timeline, weekly ranking). Contestant names are
+ * Every Tagline Counter count, each in its own file under [dir], never replaced: the raw material for the website's
+ * tagline timeline. Contestant names are
  * not written in here; they are looked up when the data is used, so fixing a link later fixes every past run too.
  * Files are written to a temporary name and renamed, so a crash never leaves half a run.
  */
@@ -35,13 +29,6 @@ class RunHistory(private val dir: File, private val nowMs: () -> Long = System::
 
     fun saveTagline(report: CountReport) = write("tagline-${report.fetchedAtMs}.json", encodeReport(report))
 
-    fun saveBoss(result: BossMeterResult, link: String, stage: String = "", final: Boolean = false) = write(
-        "boss-${result.fetchedAtMs}.json",
-        JSONObject().put("id", result.conversationId).put("total", result.totalThread).put("fetched", result.fetchedAtMs).put("link", link)
-            .put("stage", stage).put("final", final)
-            .put("tags", JSONArray(result.tags.map { JSONObject().put("tag", it.tag).put("count", it.count) })).toString(),
-    )
-
     fun recordTrending(reportAtMs: Long, tagline: String, position: Int) {
         val marks = trending(0) + TrendingMark(reportAtMs, tagline, position, nowMs())
         write("trending.json", JSONArray(marks.map { JSONObject().put("report", it.reportAtMs).put("tagline", it.tagline).put("position", it.position).put("at", it.atMs) }).toString())
@@ -50,19 +37,6 @@ class RunHistory(private val dir: File, private val nowMs: () -> Long = System::
     /** Counts fetched at or after [sinceMs], oldest first. */
     fun taglineRuns(sinceMs: Long = 0): List<CountReport> =
         files("tagline-", sinceMs).mapNotNull { f -> runCatching { decodeReport(f.readText()) }.getOrNull() }
-
-    fun bossRuns(sinceMs: Long = 0): List<BossRun> = files("boss-", sinceMs).mapNotNull { f ->
-        runCatching {
-            val o = JSONObject(f.readText())
-            val a = o.getJSONArray("tags")
-            BossRun(
-                BossMeterResult(o.getString("id"), o.getLong("total"), List(a.length()) { i -> a.getJSONObject(i).let { TagCount(it.getString("tag"), it.getLong("count")) } }, o.getLong("fetched")),
-                o.optString("link"),
-                o.optString("stage"),
-                o.optBoolean("final"),
-            )
-        }.getOrNull()
-    }
 
     fun trending(sinceMs: Long = 0): List<TrendingMark> {
         val f = File(dir, "trending.json")
@@ -74,9 +48,9 @@ class RunHistory(private val dir: File, private val nowMs: () -> Long = System::
         }.getOrDefault(emptyList()).filter { it.atMs >= sinceMs }
     }
 
-    fun summary(sinceMs: Long): HistorySummary = HistorySummary(files("tagline-", sinceMs).size, files("boss-", sinceMs).size, trending(sinceMs).size)
+    fun summary(sinceMs: Long): HistorySummary = HistorySummary(files("tagline-", sinceMs).size, trending(sinceMs).size)
 
-    val isEmpty: Boolean get() = files("tagline-", 0).isEmpty() && files("boss-", 0).isEmpty()
+    val isEmpty: Boolean get() = files("tagline-", 0).isEmpty()
 
     /** Drops runs older than [HISTORY_KEEP_DAYS]. */
     fun prune() {

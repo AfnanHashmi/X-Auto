@@ -53,10 +53,8 @@ import com.clipcut.ui.components.NavTile
 import com.clipcut.ui.components.Panel
 import com.clipcut.ui.components.Pill
 import com.clipcut.ui.deletion.DeletionActivity
-import com.clipcut.ui.bossmeter.BossMeterActivity
 import com.clipcut.ui.taglines.TaglinesActivity
 import com.clipcut.ui.scheduler.SchedulerActivity
-import com.clipcut.ui.top5.Top5Activity
 import com.clipcut.ui.unfollows.UnfollowsActivity
 import com.clipcut.domain.api.Balance
 import com.clipcut.domain.api.Balances
@@ -92,10 +90,6 @@ class HomeViewModel @Inject constructor(
         .stateIn(viewModelScope, kotlinx.coroutines.flow.SharingStarted.Eagerly, emptyMap())
 
     fun sendTagline() = note(listOf(MeterKind.TREND to sync.sendTagline()))
-
-    fun sendBoss() = note(listOf(MeterKind.BOSS to sync.sendBoss()))
-
-    fun sendAll() = note(sync.sendAll().toList())
 
     private fun note(results: List<Pair<MeterKind, SyncResult>>) {
         val problems = results.mapNotNull { (k, r) -> (r as? SyncResult.Nothing)?.let { "${k.label}: ${it.reason}" } }
@@ -173,23 +167,11 @@ fun HomeScreen(modifier: Modifier = Modifier, viewModel: HomeViewModel = hiltVie
                     )
                 },
             )
-            TileRow(
-                {
-                    NavTile(
-                        "Boss Meter", "Hashtag votes · site: ${feedText(feeds[MeterKind.BOSS])}", onClick = { BossMeterActivity.start(context) }, modifier = it,
-                        actionLabel = "↻ Send to site", onAction = viewModel::sendBoss,
-                    )
-                },
-                {
-                    NavTile(
-                        "Taglines", "Tweets per tagline · site: ${feedText(feeds[MeterKind.TREND])}", onClick = { TaglinesActivity.start(context) }, modifier = it,
-                        actionLabel = "↻ Send to site", onAction = viewModel::sendTagline,
-                    )
-                },
+            NavTile(
+                "Taglines", "Tweets per tagline · site: ${feedText(feeds[MeterKind.TREND])}", onClick = { TaglinesActivity.start(context) },
+                modifier = Modifier.fillMaxWidth(), actionLabel = "↻ Send to site", onAction = viewModel::sendTagline,
             )
-            OutlinedButton(onClick = viewModel::sendAll, modifier = Modifier.fillMaxWidth()) { Text("↻ Refresh website: Taglines and Boss Meter") }
             syncNote?.let { Text(it, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant) }
-            NavTile("Top 5 of the week", "Weekly ranking for the website", onClick = { Top5Activity.start(context) }, modifier = Modifier.fillMaxWidth(), accent = MaterialTheme.colorScheme.tertiary)
             NavTile("Recorder PC", "Start recording, upload and shut down the laptop", onClick = { SchedulerActivity.start(context) }, modifier = Modifier.fillMaxWidth())
             NavTile(
                 "Trigger Deletion",

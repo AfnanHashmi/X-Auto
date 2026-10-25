@@ -35,7 +35,7 @@ fun suggestContestant(text: String, known: Collection<String>): String? {
     return ws.firstOrNull { it.length >= 3 && it.lowercase() !in NOT_NAMES && !it.all(Char::isDigit) }?.let(::titleCase)
 }
 
-/** Which contestant each tagline and Boss Meter hashtag is for, kept on the phone. Applied when data is read, never baked in. */
+/** Which contestant each tagline is for, kept on the phone. Applied when data is read, never baked in. */
 class ContestantStore(context: Context) {
     private val prefs = context.getSharedPreferences("contestants", Context.MODE_PRIVATE)
 

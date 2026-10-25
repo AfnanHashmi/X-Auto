@@ -1,6 +1,5 @@
 package com.clipcut.domain.publish
 
-import com.clipcut.domain.bossmeter.BossMeterResult
 import com.clipcut.domain.taglines.CountReport
 import com.clipcut.domain.taglines.GridException
 import com.clipcut.domain.taglines.HOUR_MS
@@ -19,23 +18,7 @@ import java.time.temporal.ChronoUnit
 class PayloadException(message: String) : Exception(message)
 
 enum class MeterKind(val wire: String, val label: String) {
-    BOSS("boss", "Boss Meter"),
     TREND("trend", "Tagline Counter"),
-    TOP5("top5", "Top 5 of the week"),
-}
-
-/** Which post of a Boss Meter round a run is: the one with the 5 contestants, or the one with the 2 finalists. */
-enum class BossStage(val wire: String, val label: String) {
-    CONTESTANTS("contestants", "5 contestants"),
-    FINALISTS("finalists", "Finalists"),
-    ;
-
-    companion object {
-        fun from(wire: String?): BossStage? = entries.firstOrNull { it.wire == wire }
-
-        /** Exactly 2 hashtags is the finalists' post; anything else is the 5 contestants' post. */
-        fun defaultFor(hashtagCount: Int): BossStage = if (hashtagCount == 2) FINALISTS else CONTESTANTS
-    }
 }
 
 /** The website's limits on insight lines: at most this many per list, each 1 to [MAX_INSIGHT] characters. */
@@ -73,8 +56,8 @@ const val MAX_LABEL = 120
 const val MAX_HOURLY = 48
 
 /**
- * [hourly] is the tweets in each hour, oldest first (Tagline Counter only); null for Boss Meter. [insights] are short
- * lines about this item; null sends none. [count] is null only for a Top 5 row without a number.
+ * [hourly] is the tweets in each hour, oldest first (Tagline Counter only). [insights] are short
+ * lines about this item; null sends none.
  */
 data class MeterItem(
     val label: String,
@@ -82,19 +65,6 @@ data class MeterItem(
     val hourly: List<Long>? = null,
     val insights: List<String>? = null,
 )
-
-private val POST_LINK = Regex("""^(?:https?://)?(?:www\.|mobile\.)?(?:x|twitter)\.com/([A-Za-z0-9_]{1,15})/status(?:es)?/(\d{5,25})(?:[/?#].*)?$""", RegexOption.IGNORE_CASE)
-
-/**
- * `https://x.com/<user>/status/<id>` from a pasted link, or null. A bare id, or a link without a user name
- * (x.com/i/web/status/...), cannot be turned into one.
- */
-fun canonicalPostUrl(link: String): String? {
-    val m = POST_LINK.matchEntire(link.trim()) ?: return null
-    val user = m.groupValues[1]
-    if (user.equals("i", ignoreCase = true)) return null
-    return "https://x.com/$user/status/${m.groupValues[2]}"
-}
 
 private fun isoUtc(ms: Long): String = Instant.ofEpochMilli(ms).truncatedTo(ChronoUnit.SECONDS).toString()
 
@@ -127,43 +97,6 @@ private fun itemsJson(items: List<MeterItem>) = JSONArray(items.map { item ->
         item.insights?.let { put("insights", JSONArray(it)) }
     }
 })
-
-/**
- * [stage] says which post of the round this is ("contestants" starts a new round on the website when the post is new);
- * [final] marks the finalists' run as the final result, and is only allowed with [BossStage.FINALISTS]. With
- * [withInsights], short facts about the run and each hashtag go along.
- */
-fun bossPayload(result: BossMeterResult, postLink: String, stage: BossStage? = null, final: Boolean = false, withInsights: Boolean = false): PublishPayload {
-    val url = canonicalPostUrl(postLink) ?: throw PayloadException("The website needs a full post link with the user name (https://x.com/user/status/123…).")
-    if (final && stage != BossStage.FINALISTS) throw PayloadException("\"Final result\" is only for the finalists' post.")
-    val ranked = result.ranked
-    val items = ranked.mapIndexed { i, t -> MeterItem(t.tag, t.count, insights = if (withInsights) cleanInsights(bossItemInsights(result, i)) else null) }
-    validateItems(items)
-    val body = JSONObject().put("kind", "boss").put("refreshedAt", isoUtc(result.fetchedAtMs)).put("postUrl", url)
-    stage?.let { body.put("stage", it.wire) }
-    if (final) body.put("final", true)
-    if (withInsights) cleanInsights(bossInsights(result))?.let { body.put("insights", JSONArray(it)) }
-    body.put("items", itemsJson(items))
-    return PublishPayload(MeterKind.BOSS, body.toString())
-}
-
-/** About the whole run: how much of the thread voted with a tracked hashtag. */
-fun bossInsights(r: BossMeterResult): List<String> = buildList {
-    if (r.totalThread > 0) add("${"%,d".format(r.trackedSum)} of ${"%,d".format(r.totalThread)} replies used a tracked hashtag (${"%.0f".format(r.trackedSum * 100.0 / r.totalThread)}%).")
-    val ranked = r.ranked
-    if (ranked.size >= 2 && ranked[0].count > ranked[1].count) add("${ranked[0].tag} leads ${ranked[1].tag} by ${"%,d".format(ranked[0].count - ranked[1].count)} votes.")
-}
-
-/** About one hashtag: its share of the votes, and its lead over the next one when it has one. */
-fun bossItemInsights(r: BossMeterResult, index: Int): List<String> {
-    val ranked = r.ranked
-    val t = ranked[index]
-    val next = ranked.getOrNull(index + 1)
-    return listOfNotNull(
-        "${"%.1f".format(r.percent(t))}% of hashtag votes",
-        next?.takeIf { t.count > it.count }?.let { "${"%,d".format(t.count - it.count)} ahead of ${it.tag}" },
-    )
-}
 
 /**
  * Count = every tweet with the phrase in the last 24 hours (retweets included), the headline number on the screen.
@@ -205,45 +138,6 @@ fun trendPayload(
     }
     body.put("items", itemsArray)
     return PublishPayload(MeterKind.TREND, body.toString())
-}
-
-// ---- Top 5 of the week -------------------------------------------------------------------------------------------------
-
-const val MAX_WEEK_LABEL = 40
-const val MAX_TOP5_NOTE = 200
-
-/** One rank as typed: [number] and [note] may be blank. */
-/** [number] is sent as "count" (the relevance score when attached); [facts] is a second insight line that justifies it. */
-data class Top5Row(val name: String, val number: String = "", val note: String = "", val facts: String = "")
-
-/**
- * The weekly Top 5. Empty rows are skipped; order is rank. Names are required for a row to count, at most
- * [MAX_LABEL] characters and unique (any case). A number, if given, is a whole number of 0 or more. Nothing is null:
- * a missing week, number or note is simply left out.
- */
-fun top5Payload(week: String, rows: List<Top5Row>, nowMs: Long): PublishPayload {
-    val w = week.trim()
-    if (w.length > MAX_WEEK_LABEL) throw PayloadException("The week label is at most $MAX_WEEK_LABEL characters.")
-    val filled = rows.filter { it.name.isNotBlank() || it.number.isNotBlank() || it.note.isNotBlank() }
-    if (filled.isEmpty()) throw PayloadException("Add at least one contestant.")
-    if (filled.size > 5) throw PayloadException("At most 5 contestants.")
-    val items = filled.mapIndexed { i, r ->
-        val name = r.name.trim().replace(Regex("\\s+"), " ")
-        if (name.isEmpty()) throw PayloadException("Rank ${i + 1} has a number or note but no name.")
-        val number = r.number.trim().replace(",", "").takeIf { it.isNotEmpty() }?.let {
-            it.toLongOrNull()?.takeIf { n -> n >= 0 } ?: throw PayloadException("Rank ${i + 1}: the number must be a whole number, 0 or more.")
-        }
-        val note = r.note.trim().replace(Regex("\\s+"), " ")
-        if (note.length > MAX_TOP5_NOTE) throw PayloadException("Rank ${i + 1}: the note is at most $MAX_TOP5_NOTE characters.")
-        MeterItem(name, number, insights = cleanInsights(listOf(note, r.facts)))
-    }
-    val seen = HashSet<String>()
-    items.forEach { if (!seen.add(it.label.lowercase())) throw PayloadException("\"${it.label}\" appears twice.") }
-    validateItems(items)
-    val body = JSONObject().put("kind", "top5").put("refreshedAt", isoUtc(nowMs))
-    if (w.isNotEmpty()) body.put("week", w)
-    body.put("items", itemsJson(items))
-    return PublishPayload(MeterKind.TOP5, body.toString())
 }
 
 // ---- AI results on a Tagline Counter run -----------------------------------------------------------------------------

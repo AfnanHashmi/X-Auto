@@ -1,7 +1,5 @@
 package com.clipcut.domain.publish
 
-import com.clipcut.domain.bossmeter.BossMeterResult
-import com.clipcut.domain.bossmeter.TagCount
 import com.clipcut.domain.taglines.CountReport
 import com.clipcut.domain.taglines.CountSeries
 import com.clipcut.domain.taglines.HourBucket
@@ -22,10 +20,8 @@ import org.junit.Test
 import java.time.Instant
 
 private const val FETCHED = 1_792_136_716_789L // 2026-10-16T07:45:16.789Z
-private const val LINK = "https://x.com/example_channel/status/2110272039504511091?s=20"
 private const val KEY = "sk-super-secret-key-123"
 
-private fun boss(vararg tags: Pair<String, Long>) = BossMeterResult("2110272039504511091", 5983, tags.map { TagCount(it.first, it.second) }, FETCHED)
 
 private const val HOUR = 3_600_000L
 private const val END = FETCHED - 30_000L
@@ -69,20 +65,6 @@ private class FakeHttp : WebsiteHttp {
 class PublishTest {
     // ---- payload ---------------------------------------------------------------------------------------------------
     @Test
-    fun bossBodyHasTheAgreedShape() {
-        val p = bossPayload(boss("#KanikaIsTheBoss" to 4825, "#AamrapaliIsTheBoss" to 913), LINK)
-        assertEquals(MeterKind.BOSS, p.kind)
-        val j = JSONObject(p.json)
-        assertEquals("boss", j.getString("kind"))
-        assertEquals("2026-10-16T07:45:16Z", j.getString("refreshedAt"))
-        assertEquals("https://x.com/example_channel/status/2110272039504511091", j.getString("postUrl")) // tracking query removed
-        assertEquals(2, j.getJSONArray("items").length())
-        assertEquals("#KanikaIsTheBoss", j.getJSONArray("items").getJSONObject(0).getString("label"))
-        assertEquals(4825L, j.getJSONArray("items").getJSONObject(0).getLong("count"))
-        assertEquals(setOf("kind", "refreshedAt", "postUrl", "items"), j.keys().asSequence().toSet())
-    }
-
-    @Test
     fun trendBodyHasTheAgreedShapeAndNoPostUrl() {
         val j = JSONObject(trendPayload(trend("QAZI BORN TO SHINE" to 36667, "QAZI RISING ABOVE HATE" to 48517)).json)
         assertEquals("trend", j.getString("kind"))
@@ -111,7 +93,6 @@ class PublishTest {
         assertEquals(0L, h.getLong(5)) // an empty hour is 0, never null
         val empty = items.getJSONObject(1).getJSONArray("hourly")
         assertEquals(25, empty.length()); assertTrue((0 until 25).all { empty.getLong(it) == 0L })
-        assertFalse(JSONObject(bossPayload(boss("#A" to 1), LINK).json).getJSONArray("items").getJSONObject(0).has("hourly")) // Boss Meter unchanged
     }
 
     @Test
@@ -129,16 +110,6 @@ class PublishTest {
         assertThrows(PayloadException::class.java) { trendPayload(report(startMs = END - 49 * HOUR, bucket = a)) } // more than 48 hours
         assertThrows(PayloadException::class.java) { validateItems(listOf(MeterItem("a", 1, listOf(-1)))) }
         assertThrows(PayloadException::class.java) { validateItems(listOf(MeterItem("a", 1, emptyList()))) }
-    }
-
-    @Test
-    fun bossNeedsAnXStatusLinkWithAUserName() {
-        assertEquals("https://x.com/a_b/status/123456", canonicalPostUrl("twitter.com/a_b/status/123456"))
-        assertNull(canonicalPostUrl("2110272039504511091"))
-        assertNull(canonicalPostUrl("https://x.com/i/web/status/2110272039504511091"))
-        assertNull(canonicalPostUrl("https://example.com/a/status/2110272039504511091"))
-        assertNull(canonicalPostUrl("https://x.com/a/likes"))
-        assertThrows(PayloadException::class.java) { bossPayload(boss("#A" to 1), "2110272039504511091") }
     }
 
     @Test
@@ -235,9 +206,9 @@ class PublishTest {
     fun anUnbuildableResultNeverSendsAndOffersNoStalePayloadToRetry() = runTest(StandardTestDispatcher()) {
         val http = FakeHttp()
         val pub = publisher(http)
-        pub.reject(MeterKind.BOSS, "needs a full link")
-        pub.retry(MeterKind.BOSS); advanceUntilIdle()
+        pub.reject(MeterKind.TREND, "needs a full link")
+        pub.retry(MeterKind.TREND); advanceUntilIdle()
         assertTrue(http.sent.isEmpty())
-        assertEquals("needs a full link", (pub.status.value.getValue(MeterKind.BOSS) as PublishStatus.Failed).reason)
+        assertEquals("needs a full link", (pub.status.value.getValue(MeterKind.TREND) as PublishStatus.Failed).reason)
     }
 }

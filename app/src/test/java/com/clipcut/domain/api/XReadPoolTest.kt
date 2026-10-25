@@ -32,6 +32,9 @@ private class FakeGateway(
     }
 }
 
+/** A read order that prefers Main, as the tests below expect. */
+private val MAIN_FIRST = listOf(XApp.MAIN, XApp.RW, XApp.DK)
+
 class XReadPoolTest {
     private var now = 1_000_000L
     private fun pool(g: FakeGateway) = XReadPool(g, nowMs = { now })
@@ -40,7 +43,7 @@ class XReadPoolTest {
     fun eachFeatureUsesItsOwnAccountFirst() = runTest {
         val g = FakeGateway()
         val p = pool(g)
-        assertEquals(XApp.MAIN, p.read(BOSS_METER_ORDER, COUNT_URL, 0.005).first)
+        assertEquals(XApp.MAIN, p.read(MAIN_FIRST, COUNT_URL, 0.005).first)
         assertEquals(XApp.RW, p.read(TAGLINE_ORDER, COUNT_URL, 0.005).first)
         assertEquals(listOf(XApp.MAIN, XApp.RW), g.counts)
     }
@@ -56,16 +59,16 @@ class XReadPoolTest {
     @Test
     fun whenEveryAccountIsLowTheOneWithMostLeftPays() = runTest {
         val g = FakeGateway(mutableMapOf(XApp.MAIN to 0.20, XApp.RW to 0.90, XApp.DK to 0.50))
-        assertEquals(XApp.RW, pool(g).read(BOSS_METER_ORDER, COUNT_URL, 0.005).first)
+        assertEquals(XApp.RW, pool(g).read(MAIN_FIRST, COUNT_URL, 0.005).first)
     }
 
     @Test
     fun withNoBalanceKnownTheOrderIsUsedAsIs() = runTest {
         val g = FakeGateway(mutableMapOf(XApp.MAIN to null, XApp.RW to null, XApp.DK to null))
-        assertEquals(XApp.MAIN, pool(g).read(BOSS_METER_ORDER, COUNT_URL, 0.005).first)
+        assertEquals(XApp.MAIN, pool(g).read(MAIN_FIRST, COUNT_URL, 0.005).first)
         // An unchecked account is tried before one known to be low.
         val mixed = FakeGateway(mutableMapOf(XApp.MAIN to 0.10, XApp.RW to null, XApp.DK to 0.50))
-        assertEquals(XApp.RW, pool(mixed).read(BOSS_METER_ORDER, COUNT_URL, 0.005).first)
+        assertEquals(XApp.RW, pool(mixed).read(MAIN_FIRST, COUNT_URL, 0.005).first)
     }
 
     @Test
@@ -81,7 +84,7 @@ class XReadPoolTest {
     @Test
     fun everyAccountOutOfCreditsFailsWith402() = runTest {
         val g = FakeGateway().apply { failWith = XApp.entries.associateWith { 402 } }
-        val e = assertThrows(XReadException::class.java) { kotlinx.coroutines.runBlocking { pool(g).read(BOSS_METER_ORDER, COUNT_URL, 0.005) } }
+        val e = assertThrows(XReadException::class.java) { kotlinx.coroutines.runBlocking { pool(g).read(MAIN_FIRST, COUNT_URL, 0.005) } }
         assertEquals(402, e.httpCode)
         assertTrue(g.counts.isEmpty())
     }
@@ -89,7 +92,7 @@ class XReadPoolTest {
     @Test
     fun otherErrorsAreNotRetriedOnAnotherAccount() = runTest {
         val g = FakeGateway().apply { failWith = mapOf(XApp.MAIN to 429) }
-        val e = assertThrows(XReadException::class.java) { kotlinx.coroutines.runBlocking { pool(g).read(BOSS_METER_ORDER, COUNT_URL, 0.005) } }
+        val e = assertThrows(XReadException::class.java) { kotlinx.coroutines.runBlocking { pool(g).read(MAIN_FIRST, COUNT_URL, 0.005) } }
         assertEquals(429, e.httpCode) // Boss Meter's own wait-and-retry handles rate limits
         assertTrue(g.counts.isEmpty())
     }
@@ -98,17 +101,17 @@ class XReadPoolTest {
     fun accountsWithoutKeysAreNeverUsed() = runTest {
         val g = FakeGateway(configured = setOf(XApp.DK))
         val p = pool(g)
-        assertEquals(XApp.DK, p.read(BOSS_METER_ORDER, COUNT_URL, 0.005).first)
+        assertEquals(XApp.DK, p.read(MAIN_FIRST, COUNT_URL, 0.005).first)
         assertEquals(Balance.NotSetUp, p.balances.value.byApp[XApp.MAIN])
         assertEquals(listOf(XApp.DK), g.creditChecks) // no balance check for an app with no keys
-        assertNull(pool(FakeGateway(configured = emptySet())).pick(BOSS_METER_ORDER))
+        assertNull(pool(FakeGateway(configured = emptySet())).pick(MAIN_FIRST))
     }
 
     @Test
     fun aLongRunMovesOnOnceTheLocalBalanceDropsBelowOneDollar() = runTest {
         val g = FakeGateway(mutableMapOf(XApp.MAIN to 1.012, XApp.RW to 3.0, XApp.DK to 2.0))
         val p = pool(g)
-        val used = List(4) { p.read(BOSS_METER_ORDER, COUNT_URL, 0.005).first }
+        val used = List(4) { p.read(MAIN_FIRST, COUNT_URL, 0.005).first }
         assertEquals(listOf(XApp.MAIN, XApp.MAIN, XApp.MAIN, XApp.RW), used) // 1.012 → 1.007 → 1.002 → 0.997
         assertEquals(mapOf(XApp.MAIN to 3, XApp.RW to 1), p.calls.value)
     }
@@ -117,8 +120,8 @@ class XReadPoolTest {
     fun balancesAreReadAtMostEveryTwoMinutesUnlessForced() = runTest {
         val g = FakeGateway()
         val p = pool(g)
-        p.read(BOSS_METER_ORDER, COUNT_URL, 0.005)
-        p.read(BOSS_METER_ORDER, COUNT_URL, 0.005)
+        p.read(MAIN_FIRST, COUNT_URL, 0.005)
+        p.read(MAIN_FIRST, COUNT_URL, 0.005)
         assertEquals(3, g.creditChecks.size) // one check of each app
         now += 60_000
         p.refreshBalances()

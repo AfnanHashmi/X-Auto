@@ -1,6 +1,5 @@
 package com.clipcut.domain.share
 
-import com.clipcut.domain.bossmeter.BossMeterResult
 
 /** X's post limit. */
 const val X_POST_LIMIT = 280
@@ -46,21 +45,3 @@ fun fitCaption(header: String, lines: List<String>, footer: String): String {
 
 private val MEDALS = listOf("🥇", "🥈", "🥉") // gold, silver, bronze
 
-fun bossMeterShare(r: BossMeterResult, dateText: String): ShareContent {
-    val ranked = r.ranked
-    val top = ranked.firstOrNull()?.count?.coerceAtLeast(1L) ?: 1L
-    val rows = ranked.map { ShareRow(it.tag, "${n(it.count)}  (${"%.1f".format(r.percent(it))}%)", it.count.toFloat() / top) }
-    val lines = ranked.mapIndexed { i, t -> "${MEDALS.getOrElse(i) { "${i + 1}." }} ${t.tag}: ${n(t.count)} (${"%.1f".format(r.percent(t))}%)" }
-    val caption = fitCaption(
-        "🔥 Boss Meter : Update",
-        lines + "Total votes counted: ${n(r.trackedSum)}",
-        "Counted with the X API, $dateText",
-    )
-    return ShareContent(
-        title = "BOSS METER",
-        subtitle = "Share of hashtag votes in the thread",
-        rows = rows,
-        footer = "${n(r.trackedSum)} hashtag votes counted  ·  Counted with the X API  ·  $dateText",
-        caption = caption,
-    )
-}

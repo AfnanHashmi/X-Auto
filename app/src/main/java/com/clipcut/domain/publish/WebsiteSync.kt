@@ -1,6 +1,5 @@
 package com.clipcut.domain.publish
 
-import com.clipcut.domain.bossmeter.BossMeterStore
 import com.clipcut.domain.history.RunHistory
 import com.clipcut.domain.taglines.TrendCheckStore
 import com.clipcut.domain.taglines.TaglineStore
@@ -15,14 +14,13 @@ sealed interface SyncResult {
 
 /**
  * Re-sends what the app already holds to the website, without counting anything on X (no X calls, no cost). The latest
- * Tagline Counter run goes with whatever AI read-out and Trend checks exist for it now; the latest Boss Meter run goes with
- * its stage, final flag and insights. Both use the run's own timestamp, so the website updates that run in place.
+ * Tagline Counter run goes with whatever AI read-out and Trend checks exist for it now. It uses the run's own timestamp,
+ * so the website updates that run in place.
  */
 class WebsiteSync @Inject constructor(
     private val taglines: TaglineStore,
     private val trendChecks: TrendCheckStore,
     private val history: RunHistory,
-    private val boss: BossMeterStore,
     private val publisher: WebsitePublisher,
 ) {
     fun sendTagline(): SyncResult {
@@ -38,29 +36,4 @@ class WebsiteSync @Inject constructor(
         }
     }
 
-    /**
-     * Re-sends the latest Boss Meter run. With [stage] and [final] given (the choices on the Boss Meter screen) the run is
-     * sent as that: marking the saved run as the final result needs no recount. They are saved with the run, so later
-     * re-sends (the home buttons) keep them. Without them, the run goes as it was counted.
-     */
-    fun sendBoss(stage: BossStage? = null, final: Boolean? = null): SyncResult {
-        val result = boss.lastResult() ?: return SyncResult.Nothing("No Boss Meter run yet. Count first.")
-        val run = history.bossRuns().lastOrNull { it.result.fetchedAtMs == result.fetchedAtMs }
-        val link = run?.link?.takeIf { it.isNotBlank() } ?: boss.link
-        val useStage = stage ?: BossStage.from(run?.stage) ?: BossStage.from(boss.stage)
-        val useFinal = final ?: (run?.final == true)
-        return try {
-            val payload = bossPayload(result, link, useStage, useFinal, withInsights = true)
-            history.saveBoss(result, link, useStage?.wire.orEmpty(), useFinal)
-            publisher.publish(payload)
-            SyncResult.Queued
-        } catch (e: PayloadException) {
-            val why = e.message ?: "The website cannot take this result."
-            publisher.reject(MeterKind.BOSS, why)
-            SyncResult.Nothing(why)
-        }
-    }
-
-    /** Both, for the master button. The Top 5 is not included: it is published on purpose from its own screen. */
-    fun sendAll(): Map<MeterKind, SyncResult> = mapOf(MeterKind.TREND to sendTagline(), MeterKind.BOSS to sendBoss())
 }

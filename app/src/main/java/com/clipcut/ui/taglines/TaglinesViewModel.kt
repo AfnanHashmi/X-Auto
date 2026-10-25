@@ -65,15 +65,15 @@ data class TaglinesUiState(
     /** The AI read-out's cost box is open. */
     val confirmingAnalysis: Boolean = false,
     val analysisHighQuality: Boolean = false,
-    /** The newest Trend check per tagline. Paid for, so kept on the phone and used by the read-out, share, website and ranking. */
+    /** The newest Trend check per tagline. Paid for, so kept on the phone and used by the read-out, share and website. */
     val checks: Map<String, TrendCheckResult> = emptyMap(),
     /** The Trend check panel, while it is open. */
     val trend: TrendUi? = null,
     /** Share as a long post (X Premium) with the full read-out and Trend checks; off keeps the post text to 280 characters. */
     val longPosts: Boolean = true,
-    /** Which contestant each tagline counts for in the weekly ranking. */
+    /** Which contestant each tagline counts for. */
     val contestants: Map<String, String> = emptyMap(),
-    /** What the history holds from the last 7 days, for the "kept for the weekly ranking" line. */
+    /** What the history holds from the last 7 days, for the "kept on the phone" line. */
     val collected: HistorySummary? = null,
 ) {
     val estimatedCostUsd: Double get() = estimatedCostUsd(taglines.size)
@@ -173,7 +173,7 @@ class TaglinesViewModel @Inject constructor(
     /** Every contestant name used so far, for the link dialog. */
     fun knownContestants(): List<String> = contestants.knownNames()
 
-    /** Positions typed when sharing are kept with the count, as facts for the ranking. */
+    /** Positions typed when sharing are kept with the count. */
     fun recordTrending(reportAtMs: Long, positions: Map<String, Int>) {
         positions.forEach { (t, p) -> history.recordTrending(reportAtMs, t, p) }
         if (positions.isNotEmpty()) refreshContestants()
@@ -224,7 +224,7 @@ class TaglinesViewModel @Inject constructor(
             when (val out = service.count(s.taglines)) {
                 is CountOutcome.Done -> {
                     store.saveReport(out.report)
-                    history.saveTagline(out.report) // every count is kept for the timeline and the weekly ranking
+                    history.saveTagline(out.report) // every count is kept for the timeline
                     _state.update { it.copy(running = false, report = out.report, analysis = null, message = "Counted from X. About $${"%.3f".format(estimatedCostUsd(out.report.counts.size))} billed by X. Paid by ${paidByText(callsBefore, pool.calls.value)}.") }
                     refreshContestants()
                     publishTrend() // after the result is on screen

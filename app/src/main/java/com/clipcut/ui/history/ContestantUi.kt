@@ -38,7 +38,7 @@ fun ContestantPill(name: String?, onClick: () -> Unit, modifier: Modifier = Modi
     }
 }
 
-/** Links a tagline or hashtag to a contestant, for the weekly ranking. Names used before are one tap away. */
+/** Links a tagline or hashtag to a contestant. Names used before are one tap away. */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun ContestantDialog(text: String, current: String?, known: List<String>, onSave: (String) -> Unit, onCancel: () -> Unit) {
@@ -50,7 +50,7 @@ fun ContestantDialog(text: String, current: String?, known: List<String>, onSave
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Text(text, style = MaterialTheme.typography.bodyMedium)
                 Text(
-                    "Its counts go to this contestant in the weekly ranking. Fixing it here fixes past runs too.",
+                    "Its counts are credited to this contestant. Fixing it here fixes past runs too.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )

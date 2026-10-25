@@ -18,7 +18,6 @@ enum class XApp(val label: String) { MAIN("Main"), RW("RW"), DK("DK") }
 const val LOW_BALANCE_USD = 1.0
 
 /** Which account each shared read prefers first. Another one is used only when the first is low or out of credits. */
-val BOSS_METER_ORDER = listOf(XApp.MAIN, XApp.RW, XApp.DK)
 val TAGLINE_ORDER = listOf(XApp.RW, XApp.MAIN, XApp.DK)
 
 sealed interface Balance {
@@ -50,8 +49,8 @@ fun parseCredits(body: String): Double {
 }
 
 /**
- * Shares public, paid reads (tweet counts) between the accounts so one running low does not stop Boss Meter or the
- * Tagline Counter.
+ * Shares public, paid reads (tweet counts) between the accounts so one running low does not stop the Tagline
+ * Counter or the Trend check.
  *
  * - Each read goes to the first account in the feature's order whose balance is at least [LOW_BALANCE_USD]. When every
  *   account is low, the one with the most left is used. When no balance is known (the check failed), the order is used as is.

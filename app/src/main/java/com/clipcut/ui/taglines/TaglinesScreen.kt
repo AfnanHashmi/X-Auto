@@ -326,7 +326,7 @@ private fun PhraseList(state: TaglinesUiState, vm: TaglinesViewModel) {
         }
         state.collected?.let { c ->
             Text(
-                "Kept for the weekly ranking (last 7 days): ${c.taglineRuns} counts" + (if (c.trendingMarks > 0) ", ${c.trendingMarks} trending positions" else ""),
+                "Kept on the phone (last 7 days): ${c.taglineRuns} counts" + (if (c.trendingMarks > 0) ", ${c.trendingMarks} trending positions" else ""),
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
