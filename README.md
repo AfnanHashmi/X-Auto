@@ -1,11 +1,22 @@
 # X Auto
 
-A personal Android app for running the Bigg Boss clip-and-post workflow and the X accounts around it.
-Home screen features: **Clip Cut**, **Caption Generator**, **Trigger Deletion**, **Unfollowers**.
+A personal Android app (Kotlin, Jetpack Compose, Hilt, OkHttp) that runs a live-show clip-and-post workflow and the X
+accounts around it. Built with Claude Code.
 
-API keys are read from `local.properties` (git-ignored) and compiled into the debug build. They are never
-hard-coded and never logged. Build and install with `./gradlew :app:installDebug`; run the tests with
-`./gradlew :app:test`.
+| Feature | What it does |
+|---|---|
+| **Clip Cut** | Watches a live stream with a rewind window, marks in and out points, exports the clip and posts it. |
+| **Caption Generator** | Writes and polishes captions with an LLM (xAI or OpenAI), with a fallback between them. |
+| **Unfollowers** | Shows who unfollowed an account, from X's Activity API through a Cloudflare Worker (details below). |
+| **Taglines** | Counts tweets per tagline from X's counts endpoint, plus a budgeted **Trend check**: a time-sliced sample of posts that estimates natural vs organized support, bot-like accounts and sentiment. |
+| **Recorder PC** | Starts recording and runs the night upload and shutdown on a laptop over Tailscale, and edits its schedule. |
+| **Trigger Deletion** | Reviews and deletes posts from an account, only when asked. |
+
+Everything paid or public is manual and shows its cost first. Nothing is posted or deleted without a tap.
+
+API keys are read from `local.properties` (git-ignored, see `local.properties.example`) and compiled into the debug
+build. They are never hard-coded and never logged. Build and install with `./gradlew :app:installDebug`; run the tests
+with `./gradlew :app:testDebugUnitTest`.
 
 ---
 
